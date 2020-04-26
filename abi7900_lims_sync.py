@@ -12,6 +12,15 @@ import pandas as pd
 # - Write all newly created elements in a file (at least their id), for tracking what needs to be deleted from lims in case the whole thing fails.
 # - Write output files at the end of syncing
 
+# EXPERIMENT DEFINITIONS
+default_ct_threshold = 40
+positive_control_wells = [357,358,359,360,381,382,383,384]
+negative_control_wells = [1,2,3,4,25,26,27,28]
+
+# Expected amplification on A1, A2, B1, respectively
+positive_control_amplif = [True, True, True]
+negative_control_amplif = [False, False, False]
+
 # NOTIFICATION EMAIL SETTINGS
 email_receivers = ["eduard.zorita@crg.eu"]
 email_port = 465  # For SSL
@@ -21,16 +30,6 @@ email_password = os.environ.get('LIMS_EMAIL_PASSWORD')
 if email_password is None:
    print("ERROR: Plase export environment variables LIMS_EMAIL_ADDRESS and LIMS_EMAIL_PASSWORD to enable email notifications")
    sys.exit(1)
-
-
-# EXPERIMENT DEFINITIONS
-positive_control_wells = [357,358,359,360,381,382,383,384]
-negative_control_wells = [1,2,3,4,25,26,27,28]
-
-# Expected amplification on A1, A2, B1, respectively
-positive_control_amplif = [True, True, True]
-negative_control_amplif = [False, False, False]
-
 
 # API DEFINITIONS
 
@@ -220,7 +219,7 @@ if __name__ == '__main__':
    flist = glob.glob('{}/*_results.txt'.format(path))
    for fname in flist:
       platebc = fname.split('/')[-1].split('_results.txt')[0]
-      print('[pcrplate={}] BEGIN processing sample'.format(platebc))
+      print('[pcrplate={}] BEGIN sample processing'.format(platebc))
       
       # Check if PCRPLATE is already in LIMS (TODO: also check if status is PROCESSING)
       if not assert_warn(platebc in pcrplates_barcodes, '[pcrplate={}] plate barcode not present in LIMS system, cannot sync data until it is created. skipping pcrplate'.format(platebc)):
@@ -232,7 +231,7 @@ if __name__ == '__main__':
       ##
 
       plateobj = [p for p in pcrplates if p['barcode'].lower() == platebc][0]
-      print('[pcrplate={}] found PCRPLATE in LIMS (id:{}, uri:{})'.format(platebc, plateobj['id'], plateobj['resource_uri']))
+      print('[pcrplate={}] PCRPLATE found in LIMS (id:{}, uri:{})'.format(platebc, plateobj['id'], plateobj['resource_uri']))
 
       # Check if pcrrun for this plate already exists
       r, status = lims_request('GET', url=pcrrun_url, params={'pcr_plate__barcode__exact': platebc})
@@ -242,7 +241,6 @@ if __name__ == '__main__':
       if len(r.json()['objects']) > 0:
          print("[pcrplate={}] PCRRUN info already in LIMS. no need to sync".format(platebc))
          continue
-
 
       ##
       ## PARSE QPCR OUTPUT
@@ -280,7 +278,7 @@ if __name__ == '__main__':
       if not assert_warn(status == 201, '[pcrplate={}] error creating PCRRUN in LIMS. skipping pcrplate'.format(platebc)):
          continue
       pcrrun_uri = r.headers['Location']
-      print('[pcrplate={}/pcrrun] created new PCRRUN in LIMS (uri:{})'.format(platebc, pcrrun_uri))
+      print('[pcrplate={}/pcrrun] post(pcrrun) = {} (uri:{})'.format(platebc, status, pcrrun_uri))
 
       # Get all PCRWELL for this PCRPLATE
       r, status = lims_request('GET', url=pcrwell_url, params={'limit': 10000, 'pcr_plate__barcode__exact': platebc})
@@ -289,7 +287,7 @@ if __name__ == '__main__':
 
       # Note: PCRWELL position is in A1, A2... format
       pcrwells = r.json()['objects']
-      print('[pcrplate={}/pcrwell] found {} PCRWELLs for this PCRPLATE in LIMS'.format(platebc, len(pcrwells)))
+      print('[pcrplate={}/pcrwell] len(pcrplate={}/pcrwell) = {}'.format(platebc, platebc, len(pcrwells)))
 
       # Create a lookup table of well_position -> well_id
       pcrwell_pos_to_uri = {p['position'].upper():p['resource_uri'] for p in pcrwells}
@@ -297,7 +295,7 @@ if __name__ == '__main__':
       # NOW NEED TO FILL IN AL WELL INFO IN THE SAME PCRWELL OBJECTS AND PATCH THEM BACK! THE REST (results) IS IDENTICAL! :)
 
       # Create diagnosis for each PCRWELL
-      diagnosis = [[None,None,None]]*384
+      diagnosis = [[None,None,None] for i in range(385)]
 
       for row in results.iterrows():
          i = row[0]
@@ -311,9 +309,9 @@ if __name__ == '__main__':
          ## CREATE RESULTS ENTRY
          ##
 
-         threshold = None if pd.isna(row['Threshold']) else row['Threshold']
+         threshold = default_ct_threshold if pd.isna(row['Threshold']) else row['Threshold']
          ct = None if row['Ct'] == 'NA' else row['Ct']
-         amplification = None if threshold is None else False if ct is None else ct <= threshold
+         amplification = None if threshold is None else False if ct is None else float(ct) <= threshold
 
          if not assert_warn(row['Detector Name'].lower() in detector_ids, '[pcrplate={}/pcrwell={}] detector {} not found in LIMS. setting to "None"'.format(platebc, pcrwell_pos, row['Detector Name'])):
             detector_id = None
@@ -348,7 +346,7 @@ if __name__ == '__main__':
                dpos = well_num
                samp = 0
 
-         if not dpos is None:
+         if dpos:
             diagnosis[dpos][samp] = diagnosis[dpos+1][samp] = diagnosis[dpos+24][samp] = amplification
 
          # Make a POS to create RESULTS entry
@@ -357,7 +355,7 @@ if __name__ == '__main__':
             continue
          results_uri = r.headers['Location']
 
-         print('[pcrplate={}/pcrwell={}/results] created new RESULTS entry for this PCRWELL (uri:{})'.format(platebc, pcrwell_pos, results_uri))
+         print('[pcrplate={}/pcrwell={}/results] post(results) = {} (uri:{})'.format(platebc, pcrwell_pos, status, results_uri))
 
          
          ##
@@ -381,6 +379,7 @@ if __name__ == '__main__':
          _, status = lims_request('PATCH', amplification_url, json_data={'objects': amplification_data})
          if not assert_warn(status < 300, '[pcrplate={}/pcrwell={}/amplification_data] error in PATCH request to create Rn'.format(platebc, pcrwell_pos)):
             continue
+         print('[pcrplate={}/pcrwell={}/results/amplificationdata] patch/post(amplificationdata) = {}'.format(platebc, pcrwell_pos, status))
 
       # All wells processed at this point, time to update pcrwell
       for pcrwell in pcrwells:
@@ -402,6 +401,7 @@ if __name__ == '__main__':
       _, status = lims_request('PATCH', pcrwell_url, json_data={'objects': pcrwells})
       if not assert_warn(status < 300, '[pcrplate={}/pcrwell={}/amplification_data] error in PATCH request to update PCRWELL'.format(platebc, pcrwell_pos)):
          continue
+      print('[pcrplate={}/pcrwell={}] patch/update(pcrwell) = {}'.format(platebc, pcrwell_pos, status))
 
       # Store parsing output
       rn['bcd'] = platebc
