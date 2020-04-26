@@ -17,6 +17,7 @@ organization_name = 'CRG'
 base_url = 'https://orfeu.cnag.crg.eu'
 api_root = '/prbblims_devel/api/covid19/'
 pcrplate_base = '{}pcrplate/'.format(api_root)
+pcrrun_base = '{}pcrrun/'.format(api_root)
 pcrwell_base = '{}pcrwell/'.format(api_root)
 detector_base = '{}detector/'.format(api_root)
 results_base = '{}results/'.format(api_root)
@@ -25,6 +26,7 @@ organization_base = '{}organization/'.format(api_root)
 
 pcrplate_url = '{}{}'.format(base_url, pcrplate_base)
 pcrwell_url = '{}{}'.format(base_url, pcrwell_base)
+pcrrun_url = '{}{}'.format(base_url, pcrrun_base)
 detector_url = '{}{}'.format(base_url, detector_base)
 results_url = '{}{}'.format(base_url, results_base)
 amplification_url = '{}{}'.format(base_url, amplification_base)
@@ -64,7 +66,7 @@ req_headers = {'content-type': 'application/json', 'Authorization': 'ApiKey {}:{
 
 def lims_request(method, url, params=None, json_data=None, headers=req_headers):
    # methods: GET, OPTIONS, HEAD, POST, PUT, PATCH, DELETE
-   r = requests.request(method, url, params=params, headers=headers, json=json_data)
+   r = requests.request(method, url, params=params, headers=headers, json=json_data, verify=False)
    assert_warn(r.status_code < 300,
                   'LIMS request returned non-successful response ({}). Request details: URL={}, PARAMS={}, DATA={}'.format(
                      r.status_code,
@@ -139,38 +141,72 @@ if __name__ == '__main__':
    # Need a wrapper to check that the request worked
    pcrplates, status = lims_request('GET', url=pcrplate_url, params={'limit': 1000000})
    assert_error(status < 300, 'Could not retreive pcr plates from LIMS')
-   pcr_plate_barcodes = [pcrplate['barcode'] for pcrplate in pcrplates.json()['objects']]
+   pcrplates = pcrplates.json()['objects']
+   pcrplates_barcodes = [pcrplate['barcode'] for pcrplate in pcrplates]
 
    # Get list of detector ids
    detectors, status = lims_request('GET', url=detector_url, params={'limit': 1000000})
    assert_error(status < 300, 'Could not retreive pcr detectors from LIMS')
    detector_ids = {detector['name'].lower(): int(detector['id']) for detector in detectors.json()['objects']}
-
   
    # Find all processed samples in path
-   print("GLOB")
    flist = glob.glob('{}/*_results.txt'.format(path))
    for fname in flist:
       platebc = fname.split('/')[-1].split('_results.txt')[0]
-      print('processing sample: {}'.format(platebc))
+      print('[pcrplate/barcode={}] BEGIN processing sample'.format(platebc))
       
-      # Check if sample is already in LIMS
-      if platebc in pcr_plate_barcodes:
-         # LOG (DEBUG)
+      # Check if PCRPLATE is already in LIMS (TODO: also check if status is PROCESSING)
+      if not assert_warn(platebc in pcrplates_barcodes, '[pcrplate/barcode={}] plate barcode not present in LIMS system, cannot sync data until it is created. skipping pcrplate'.format(platebc)):
          continue
 
-      # LIMS cache
-      lcache = []
-      
-      # Push new PCR plate to LIMS
-      # plate_data = {'id':None, 'barcode':platebc, 'plate_name':platebc, 'organization': org_id} // ORGANIZATION DOES NOT WORK
-      plate_data = {'id':None, 'barcode':platebc, 'plate_name':platebc}
-      r, status = lims_request('POST', pcrplate_url, json_data=plate_data)
-      if not assert_warn(status == 201, 'error creating pcr plate (barcode: {}), skipping sample sync'.format(platebc)):
+      plateobj = [p for p in pcrplates if p['barcode'].lower() == platebc][0]
+      print('[pcrplate/barcode={}] found PCRPLATE in LIMS (id:{}, uri:{})'.format(platebc, plateobj['id'], plateobj['uri']))
+
+      import pdb; pdb.set_trace()
+      r, status = lims_request('GET', url=pcrrun_url, params={'pcr_plate__iexact': plateobj['resource_uri']))
+      if not assert_warn(status == 200, '[pcrplate/barcode={}] error checking presence of PCRRUN. skipping pcrplate'.format(platebc)):
          continue
-      pcrplate_uri = r.headers['Location']
-      
-      #lcache.append(res)
+
+      if len(r.json()['objects']) > 0:
+         if r.json()['objects'][0]['status'] == 'PROCESSING':
+            print("[pcrplate/barcode={}] PCRRUN info already in LIMS, but status=PROCESSING. did this sample fail to sync?".format(platebc))
+            # NOT SURE YET WHAT TO DO HERE, let's skip for now
+            continue
+         else:
+            print("[pcrplate/barcode={}] PCRRUN info already in LIMS. no need to sync".format(platebc))
+            continue
+            
+      # Push new PCRRUN to LIMS
+      pcrrun_data = {
+         'id': None,
+         'pcr_plate': plateobj['resource_uri'],
+         'technician_id': None,
+         'pcr_run_instrument_id': None,
+         'pcr_run_protocol_id': None,
+         'date_run': date_parse(run_date).isoformat(),
+         'raw_results_file_path': fname,
+         'results_file_path': fname, #TODO: UPDATE PATH
+         'run_log_path': fname, #TODO: UPDATE PATH
+         'analysis_result_file_path': fname, #TODO: UPDATE PATH
+         'status': 'PROCESSING',
+         'comments': None
+      }
+      r, status = lims_request('POST', pcrrun_url, json_data=pcrrun_data)
+      if not assert_warn(status == 201, '[pcrplate/barcode={}] error creating PCRRUN in LIMS. skipping pcrplate'.format(platebc)):
+         continue
+      pcrrun_uri = r.headers['Location']
+      print('[pcrplate/barcode={}] created new PCRRUN in LIMS (uri:{})'.format(platebc, pcrrun_uri))
+
+      # Get all PCRWELL for this PCRPLATE
+      r, status = lims_request('GET', url=pcrwell_url, params={'limit': 10000, 'pcr_plate__iexact': plateobj['resource_uri']})
+      if not assert_warn(status == 200, '[pcrplate/barcode={}] error getting PCRWELLS for this PCRPLATE. skipping pcrplate. (Note: I have created PCRRUN {})'.format(platebc, pcrrun_uri)):
+        continue
+
+     # Note: PCRWELL position is in A1, A2... format
+     pcrwells = r['objects']
+     print('[pcrplate/barcode={}] found {} PCRWELL for this PCRPLATE in LIMS'.format(platebc, len(pcrwells)))
+
+      # NOW NEED TO FILL IN AL WELL INFO IN THE SAME PCRWELL OBJECTS AND PATCH THEM BACK! THE REST (results) IS IDENTICAL! :)
 
       # Parse results
       results, run_date = parse_results(fname)
