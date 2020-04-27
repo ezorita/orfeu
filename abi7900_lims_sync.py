@@ -252,7 +252,14 @@ if __name__ == '__main__':
    detectors, status = lims_request('GET', url=detector_url, params={'limit': 1000000})
    assert_critical(status < 300, 'Could not retreive pcr detectors from LIMS')
    detector_ids = {detector['name'].lower(): detector['resource_uri'] for detector in detectors.json()['objects']}
-  
+
+   # Digest lists
+   pcr_skipped = []
+   pcr_noinfo  = []
+   pcr_warning = []
+   pcr_error   = []
+   pcr_synced  = []
+
    # Find all processed samples in path
    flist = glob.glob('{}/*_results.txt'.format(path))
    
@@ -263,6 +270,7 @@ if __name__ == '__main__':
       # Check if PCRPLATE is already in LIMS (TODO: also check if status is PROCESSING)
       if not assert_warning(platebc in pcrplates_barcodes, '[pcrplate={}] pcrplate/barcode not present in LIMS system, cannot sync data until it is created'.format(platebc)):
          logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
+         pcr_noinfo.append(platebc)
          # Add to not_sync list
          continue
 
@@ -278,12 +286,14 @@ if __name__ == '__main__':
       r, status = lims_request('GET', url=pcrrun_url, params={'pcr_plate__barcode__exact': platebc})
       if not assert_error(status == 200, '[pcrplate={}] error checking presence of PCRRUN'.format(platebc)):
          logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
+         pcr_error.append(platebc)
          # Add to not_sync list
          continue
 
       if len(r.json()['objects']) > 0:
          logging.info("[pcrplate={}] pcrrun info already in LIMS".format(platebc))
          logging.info("[pcrplate={}] SKIP pcrplate processing".format(platebc))
+         pcr_skipped.append(platebc)
          continue
 
       
@@ -328,6 +338,7 @@ if __name__ == '__main__':
       r, status = lims_request('POST', pcrrun_url, json_data=pcrrun_data)
       if not assert_error(status == 201, '[pcrplate={}] error creating PCRRUN in LIMS'.format(platebc)):
          logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
+         pcr_error.append(platebc)
          # Add to not_sync list
          continue
 
@@ -339,6 +350,7 @@ if __name__ == '__main__':
       r, status = lims_request('GET', url=pcrwell_url, params={'limit': 10000, 'pcr_plate__barcode__exact': platebc})
       if not assert_error(status == 200, '[pcrplate={}/pcrwell] error getting PCRWELLs for this PCRPLATE'.format(platebc)):
          logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
+         pcr_error.append(platebc)
          # Add to not_sync list
          continue
 
@@ -361,6 +373,7 @@ if __name__ == '__main__':
          
          if not assert_warning(pcrwell_pos in pcrwell_pos_to_uri, '[pcrplate={}/pcrwell] well {} not found in LIMS'.format(platebc, pcrwell_pos)):
             logging.info('[pcrplate={}/pcrwell={}] ABORT pcrwell processing'.format(platebc, pcrwell_pos))
+            pcr_warning.append(platebc)
             continue
          
          ##
@@ -375,6 +388,7 @@ if __name__ == '__main__':
          # qPCR detector
          if not assert_warning(row['Detector Name'].lower() in detector_ids, '[pcrplate={}/pcrwell={}] detector {} not found in LIMS, setting to "None"'.format(platebc, pcrwell_pos, row['Detector Name'])):
             detector_id = None
+            pcr_warning.append(platebc)
          else:
             detector_id = detector_ids[row['Detector Name'].lower()]
 
@@ -414,6 +428,7 @@ if __name__ == '__main__':
          r, status = lims_request('POST', results_url, json_data=results_data)
          if not assert_error(status == 201, '[pcrplate={}/pcrwell={}/results] error creating results'.format(platebc, pcrwell_pos)):
             logging.info('[pcrplate={}/pcrwell={}] ABORT pcrwell processing'.format(platebc, pcrwell_pos))
+            pcr_error.append(platebc)
             continue
 
          # Get new element uri
@@ -443,6 +458,8 @@ if __name__ == '__main__':
          # PATCH request (amplificationdata)
          _, status = lims_request('PATCH', amplification_url, json_data={'objects': amplification_data})
          if not assert_error(status < 300, '[pcrplate={}/pcrwell={}/amplificationdata] error in PATCH request to create Rn'.format(platebc, pcrwell_pos)):
+            logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
+            pcr_error.append(platebc)
             continue
          logging.info('[pcrplate={}/pcrwell={}/results/amplificationdata] patch/post(amplificationdata) = {}'.format(platebc, pcrwell_pos, status))
 
@@ -470,7 +487,7 @@ if __name__ == '__main__':
       _, status = lims_request('PATCH', pcrwell_url, json_data={'objects': pcrwells})
       if not assert_error(status < 300, '[pcrplate={}/pcrwell] error in PATCH request to update pcrwell (autodiagnosis)'.format(platebc, pcrwell_pos)):
          logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
-         # Add to not_sync list
+         pcr_error.append(platebc)
          continue
       logging.info('[pcrplate={}/pcrwell] patch/update(pcrwell) = {}'.format(platebc, status))
 
@@ -487,4 +504,6 @@ if __name__ == '__main__':
       logging.info('[pcrplate={}] export Rn/Delta_Rn values to: {}'.format(platebc, rn_outfile))
       
       logging.info('[pcrplate={}] SUCCESS pcrplate processing'.format(platebc))
+
       # Add to synced list
+      pcr_synced.append(platebc)
