@@ -29,10 +29,6 @@ control_amplif = {
    'Pos_RP_N1N2': [True,  True,  True]
 }
 
-# Expected amplification on A1, A2, B1, respectively
-positive_control_amplif = [True, True, True]
-negative_control_amplif = [False, False, False]
-
 # Get environment variables
 LIMS_USER      = os.environ.get('LIMS_USER')
 LIMS_PASSWORD  = os.environ.get('LIMS_PASSWORD')
@@ -276,7 +272,7 @@ if __name__ == '__main__':
       ## CHECK SYNC STATUS
       ##
 
-      plateobj = [p for p in pcrplates if p['barcode'].lower() == platebc][0]
+      plateobj = [p for p in pcrplates if p['barcode'].lower() == platebc.lower()][0]
       logging.info('[pcrplate={}] pcrplate found in LIMS (id:{}, uri:{})'.format(platebc, plateobj['id'], plateobj['resource_uri']))
 
       # Check if pcrrun for this plate already exists
@@ -291,7 +287,23 @@ if __name__ == '__main__':
          logging.info("[pcrplate={}] SKIP pcrplate processing".format(platebc))
          continue
 
-      
+      ##
+      ## GET CONTROL POSITIONS
+      ##
+
+      # Get control positions
+      control_type = {}
+      for control_name in control_amplif:
+         # Get request, filter by sample type
+         r, status = lims_request("GET", url=pcrwell_url, params={'rna_extraction_well__sample__sample_type__name__exact': control_name, 'pcr_plate__barcode__exact': platebc})
+         if not assert_error(status == 200, '[pcrplate={}/pcrwell] error retreiving control position (control name={})'.format(platebc, control_name)):
+            logging.warning('[pcrplate={}] automatic control checking disabled for control name={}'.format(platebc, control_name))
+
+         # Create a lookup table: well_position -> control type
+         cp = {p['position'] : control_name for p in r.json()['objects']}
+         control_type.update(cp)
+
+         
       ##
       ## PARSE QPCR OUTPUT
       ##
@@ -458,15 +470,20 @@ if __name__ == '__main__':
 
       for pcrwell in pcrwells:
          dpos = int((ord(pcrwell['position'][0].upper())-65)*24 + int(pcrwell['position'][1:]))
-         if dpos in positive_control_wells:
-            pass_fail = 'P' if diagnosis[dpos] == positive_control_amplif else 'F'
-            auto_diagnosis = None
-         elif dpos in negative_control_wells:
-            pass_fail = 'P' if diagnosis[dpos] == negative_control_amplif else 'F'
-            auto_diagnosis = None
+
+         # Check if control well has the expected amplification
+         if pcrwell['position'] in control_type:
+            import pdb; pdb.set_trace()
+            pass_fail = diagnosis[dpos] == control_amplif[control_type[pcrwell['position']]]
+            pass_fail = 'P' if pass_fail else 'F'
+
+            if pass_fail == 'F':
+               # TODO: Report that control has failed.
+               pass
          else:
             pass_fail = 'NA'
-            auto_diagnosis = compute_diagnosis(diagnosis[dpos])
+            
+         auto_diagnosis = compute_diagnosis(diagnosis[dpos])
 
          pcrwell['pass_fail'] = pass_fail
          pcrwell['automatic_diagnosis'] = auto_diagnosis
