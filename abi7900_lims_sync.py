@@ -21,8 +21,13 @@ import pandas as pd
 
 # EXPERIMENT DEFINITIONS
 default_ct_threshold   = 40
-positive_control_wells = [357,358,359,360,381,382,383,384]
-negative_control_wells = [1,2,3,4,25,26,27,28]
+
+# Expected amplification in controls (A1, A2, B1)
+control_amplif = {
+   'Neg':         [False, False, False],
+   'Pos_RP':      [False, False, True],
+   'Pos_RP_N1N2': [True,  True,  True]
+}
 
 # Expected amplification on A1, A2, B1, respectively
 positive_control_amplif = [True, True, True]
