@@ -215,7 +215,7 @@ def html_digest(digest, log_file):
 
 def send_digest(digest, log_file):
    message = MIMEMultipart()
-   message['Subject'] = "LIMS update report"
+   message['Subject'] = "LIMS update report ({})".format(job_name)
    message['Bcc']     = ','.join(email_receivers)
    message.attach(html_digest(digest, log_file))
    
@@ -648,4 +648,7 @@ if __name__ == '__main__':
    # Finally:
    # Send digest
    logging.shutdown()
-   send_digest(digest, logpath)
+
+   # Send digest e-mail if there is something interesting to report
+   if len(digest['error']) > 0 or len(digest['warning']) > 0 or len(digest['success']) > 0:
+      send_digest(digest, logpath)
