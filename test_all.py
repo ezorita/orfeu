@@ -1,4 +1,7 @@
+import logging
+import os
 import pytest
+import re
 import sys
 import unittest
 import urllib
@@ -45,3 +48,39 @@ class TestBasic(unittest.TestCase):
       self.assertTrue(lims_sync_7900ht.results_url.startswith(prefixall))
       self.assertTrue(lims_sync_7900ht.amplification_url.startswith(prefixall))
       self.assertTrue(lims_sync_7900ht.organization_url.startswith(prefixall))
+
+   def test_globals(self):
+
+      pytest.importorskip('lims_sync_7900ht')
+      import lims_sync_7900ht
+
+      match = re.match(r'\d{8}_\d{6}', lims_sync_7900ht.job_name)
+      self.assertIsNotNone(match)
+
+      match = re.match(r'\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}',
+            lims_sync_7900ht.job_start)
+      self.assertIsNotNone(match)
+
+   def test_options(self):
+
+      pytest.importorskip('lims_sync_7900ht')
+      import lims_sync_7900ht
+
+      # Check that calling with insufficient options causes exit.
+      with self.assertRaises(SystemExit):
+         lims_sync_7900ht.getOptions(args=[])
+
+      with self.assertRaises(SystemExit):
+         lims_sync_7900ht.getOptions(args=['-o', 'odir'])
+
+      with self.assertRaises(SystemExit):
+         lims_sync_7900ht.getOptions(args=['-l', 'lir'])
+
+      with self.assertRaises(SystemExit):
+         lims_sync_7900ht.getOptions(args=['-o', 'odir', '-l', 'ldir'])
+
+      # Check that otherwise the call is fine.
+      opt = lims_sync_7900ht.getOptions(args=['-o', 'odir', '-l', 'ldir', 'path'])
+      self.assertEqual(opt.path, 'path')
+      self.assertEqual(opt.output, 'odir')
+      self.assertEqual(opt.logpath, 'ldir')
