@@ -10,7 +10,7 @@ import logging
 from dateutil.parser import parse as date_parse
 import pandas as pd
 
-__version__ = '0.6'
+__version__ = '0.7'
 
 # TODO: How to handle unfinished syncs (i.e. the connection broke during sync) --> verify script
 #
@@ -88,6 +88,47 @@ def setup_logger(log_path):
 
 
 ###
+### DIAGNOSIS
+###
+
+status_code = {
+   'N': 0, # Negative diagn.
+   'P': 1, # Positive diagn.
+   'I': 2, # Inconclusive diagn.
+   'NAD': 3, # Not processed (no autodiagnosis)
+   'EMP': 4, # Empty well
+   'PCT': 5, # Passed control
+   'FCT': 6, # Failed control
+}
+
+status_color = {
+   status_code['N']:   'steelblue',
+   status_code['P']:   'deeppink',
+   status_code['I']:   'gold',
+   status_code['NAD']: 'darkslategray',
+   status_code['EMP']: 'lightgray',
+   status_code['PCT']: 'darkgreen',
+   status_code['FCT']: 'darkred'
+}
+
+def compute_diagnosis(samples):
+   if samples == [False, False, False]\
+      or samples == [False, True, False]\
+      or samples == [True, False, True]\
+      or samples == [False, True, True]:
+      return 'I'
+   
+   elif samples == [True, True, False]\
+        or samples == [True, True, True]:
+      return 'P'
+
+   elif samples == [False, False, True]:
+      return 'N'
+
+   else: return None
+
+
+###
 ### EMAIL NOTIFICATIONS
 ### 
 
@@ -99,7 +140,7 @@ def html_digest(digest, log_file, tb):
    # Convert digest lists to sets
    digest['nofile']  = list(set(digest['nofile']))
    digest['noinfo']  = list(set(digest['noinfo']))
-   digest['nowells']  = list(set(digest['nowells']))
+   digest['nowells'] = list(set(digest['nowells']))
    digest['success'] = list(set(digest['success']))
    digest['warning'] = list(set(digest['warning']))
    digest['error']   = list(set(digest['error']))
@@ -175,7 +216,70 @@ def html_digest(digest, log_file, tb):
          html += '</ul>'
 
          # Sample stats
+         html += '<br><h2>Sample stats</h2>\n'
+         html += '<table style="white-space:nowrap;"><tr>\
+            <th>PCR barcode</th>\
+            <th>Total Samples</th>\
+            <td>Negative</td>\
+            <td>Positive</td>\
+            <td>Inconclusive</td>\
+            <td>No AD</td>\
+            <th>Total Controls</th>\
+            <td>Passed</td>\
+            <td>Failed</td>\
+            </tr>'
+                     
+         for bcd in digest['sample']:
+            # Compute sample frequencies
+            freq = pd.Series([c for r in digest['sample'][bcd] for c in r]).value_counts()
+            for s in status_code:
+               if not status_code[s] in freq.index:
+                  freq[status_code[s]] = 0
 
+            # Fill table
+            html += '<tr>'
+            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(bcd)
+            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['P']]+freq[status_code['N']]+freq[status_code['I']]+freq[status_code['NAD']])
+            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['N']])
+            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['P']])
+            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['I']])
+            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['NAD']])
+            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['PCT']]+freq[status_code['FCT']])
+            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['PCT']])
+            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['FCT']])
+            html += '</tr>'
+         html += '</table>'
+
+         # PCR plate viz
+
+         # Legend
+         html += '<br><h2>Sample visualization</h2>\n'
+         html += '<table style="white-space:nowrap; empty-cells: show;"><tr>'
+         html += '<td style="background-color:{}">&nbsp;</td><td>Negative</td>'.format(status_color[status_code['N']])
+         html += '<td style="background-color:{}">&nbsp;</td><td>Positive</td>'.format(status_color[status_code['P']])
+         html += '<td style="background-color:{}">&nbsp;</td><td>Inconclusive</td>'.format(status_color[status_code['I']])
+         html += '<td style="background-color:{}">&nbsp;</td><td>No-AD</td>'.format(status_color[status_code['NAD']])
+         html += '<td style="background-color:{}">&nbsp;</td><td>Empty</td>'.format(status_color[status_code['EMP']])
+         html += '<td style="background-color:{}">&nbsp;</td><td>Control OK</td>'.format(status_color[status_code['PCT']])
+         html += '<td style="background-color:{}">&nbsp;</td><td>Control FAIL</td>'.format(status_color[status_code['FCT']])
+         html += '</tr></table>'
+         for bcd in digest['sample']:
+            html += '<h3>PCR run: {}</h3>\n'.format(bcd)
+
+            # Table
+            html += '<table style="empty-cells: show;"><tr>'
+            # Add headers (numbers)
+            for i in range(13):
+               html += '<th style="width:18px;"><span style="font-family:\'Courier New\'">{}</span></th>'.format(i if i else '')
+            html += '</tr>'
+
+            # Add rows
+            for i, r in enumerate(digest['sample'][bcd]):
+               html += '<tr><th><span style="font-family:\'Courier New\'">{}</span></th>'.format(chr(65+i))
+               for c in r:
+                  html += '<td style="background-color:{}">&nbsp;</td>'.format(status_color[c])
+               html += '</tr>'
+            html += '</table>'
          # Control checks
          html += '<br><h2>Control checks</h2>\n'
 
@@ -274,29 +378,7 @@ def assert_error(cond, msg):
 def assert_warning(cond, msg):
    if not cond:
       logging.warning(msg)
-   return cond
-
-
-###
-### DIAGNOSIS
-###
-
-def compute_diagnosis(samples):
-   if samples == [False, False, False]\
-      or samples == [False, True, False]\
-      or samples == [True, False, True]\
-      or samples == [False, True, True]:
-      return 'I'
-   
-   elif samples == [True, True, False]\
-        or samples == [True, True, True]:
-      return 'P'
-
-   elif samples == [False, False, True]:
-      return 'N'
-
-   else: return None
-   
+   return cond   
 
 ###
 ### LIMS REQUEST METHODS
@@ -378,7 +460,8 @@ if __name__ == '__main__':
          'success': [],
          'warning': [],
          'error':   [],
-         'control': {}
+         'control': {},
+         'sample':  {}
       }
 
       # Test LIMS connection
@@ -475,6 +558,13 @@ if __name__ == '__main__':
             cp = {p['position'] : control_name for p in r.json()['objects']}
             control_type.update(cp)
 
+         ##
+         ## DIGEST DATA
+         ##
+
+         # Prepare digest sample structure
+         digest['sample'][platebc]  = [[status_code['EMP']]*12 for x in range(8)]
+
          # Prepare digest control structure
          digest['control'][platebc] = {ct: list() for ct in control_amplif}
 
@@ -543,9 +633,9 @@ if __name__ == '__main__':
             pcrwell_pos = chr(65+(well_num-1)//24)+str((well_num-1)%24+1)
             logging.info('[pcrplate={}/pcrwell={}] BEGIN pcrwell processing'.format(platebc, pcrwell_pos))
 
-            if not assert_warning(pcrwell_pos in pcrwell_pos_to_uri, '[pcrplate={}/pcrwell] well {} not found in LIMS'.format(platebc, pcrwell_pos)):
+            if not (pcrwell_pos in pcrwell_pos_to_uri):
+               logging.info('[pcrplate={}/pcrwell] well {} not found in LIMS'.format(platebc, pcrwell_pos))
                logging.info('[pcrplate={}/pcrwell={}] ABORT pcrwell processing'.format(platebc, pcrwell_pos))
-               digest['warning'].append(platebc)
                continue
 
             ##
@@ -637,36 +727,50 @@ if __name__ == '__main__':
 
 
          ##
-         ## AUTOMATIC DIAGNOSIS
+         ## AUTOMATIC DIAGNOSIS (SINGLEPLEX SPECIFIC CODE)
          ##
 
          for pcrwell in pcrwells:
             dpos = int((ord(pcrwell['position'][0].upper())-65)*24 + int(pcrwell['position'][1:]))
+            
+            # Find base position, this is the top left well of each singleplexed sample (WARN: ASSUMES LOCAL SINGLEPLEX)
+            if ((dpos-1)//24)%2:
+               base_pos = dpos-25 if (dpos-1)%2 else dpos-24
+            else:
+               base_pos = dpos-1 if (dpos-1)%2 else dpos
+               
+            # Find row/column in 96-well plate
+            row = (base_pos-1)//48
+            col = ((base_pos-1)%48)//2
+
 
             # Check if control well has the expected amplification
             if pcrwell['position'] in control_type:
                pass_fail = diagnosis[dpos] == control_amplif[control_type[pcrwell['position']]]
                pass_fail = 'P' if pass_fail else 'F'
 
-               # Set control digest
-               # Find base position, this is the top left well of each singleplexed sample (WARN: ASSUMES LOCAL SINGLEPLEX)
-               if ((dpos-1)//24)%2:
-                  base_pos = dpos-25 if (dpos-1)%2 else dpos-24
-               else:
-                  base_pos = dpos-1 if (dpos-1)%2 else dpos
-
-               # Convert to 'A1'->'Q24' w384 notation
+               # Store control status in control check
                w384_pos = chr(65+(base_pos-1)//24)+str((base_pos-1)%24+1)
                digest['control'][platebc][control_type[w384_pos]].append((w384_pos, pass_fail))
-
+               
+               # Store control status in sample digest
+               digest['sample'][platebc][row][col] = status_code['PCT' if pass_fail == 'P' else 'FCT']
+               
             else:
                pass_fail = 'NA'
+               auto_diagnosis = compute_diagnosis(diagnosis[dpos])
 
-            auto_diagnosis = compute_diagnosis(diagnosis[dpos])
+               # Store sample diagnosis in sample digest
+               digest['sample'][platebc][row][col] = status_code['NAD' if auto_diagnosis is None else auto_diagnosis]
 
             pcrwell['pass_fail'] = pass_fail
             pcrwell['automatic_diagnosis'] = auto_diagnosis
 
+
+         ##
+         ## UPDATE PCRWELL
+         ##
+         
          # All wells have been processed, PATCH back to API
          _, status = lims_request('PATCH', pcrwell_url, json_data={'objects': pcrwells})
          if not assert_error(status < 300, '[pcrplate={}/pcrwell] error in PATCH request to update pcrwell (autodiagnosis)'.format(platebc, pcrwell_pos)):
@@ -717,4 +821,5 @@ if __name__ == '__main__':
          or len(digest['noinfo']) > 0\
          or len(digest['nofile']) > 0\
          or len(digest['nowells']) > 0:
+
          send_digest(digest, logpath, tb)
