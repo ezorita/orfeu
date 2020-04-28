@@ -216,8 +216,8 @@ def html_digest(digest, log_file, tb):
       #  Success (there is sample/control data)
       if len(digest['success']) > 0:
          html += '<br><b>List of synchronized PCR runs:</b>\n<ul>'
-         for bcd in digest['success']:
-            html += '<li>{}</li>'.format(bcd, bcd)
+         for bcd, resync in digest['success']:
+            html += '<li>{}{}</li>'.format(bcd, ' (resync)' if resync else '') 
          html += '</ul>'
 
          # Sample stats
@@ -489,13 +489,13 @@ if __name__ == '__main__':
       flist = glob.glob('{}/*_results.txt'.format(path))
 
       for fname in flist:
+         resync  = False
          platebc = fname.split('/')[-1].split('_results.txt')[0]
 
          # Check if PCRPLATE is already in LIMS (TODO: also check if status is PROCESSING)
          if not assert_warning(platebc in pcrplates_barcodes, '[pcrplate={}] pcrplate/barcode not present in LIMS system, cannot sync data until it is created'.format(platebc)):
             logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
             digest['noinfo'].append(platebc)
-            # Add to not_sync list
             continue
 
 
@@ -511,7 +511,6 @@ if __name__ == '__main__':
          if not assert_error(status == 200, '[pcrplate={}] error checking presence of PCRRUN'.format(platebc)):
             logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
             digest['error'].append(platebc)
-            # Add to not_sync list
             continue
 
          if len(r.json()['objects']) > 0:
@@ -522,6 +521,42 @@ if __name__ == '__main__':
          logging.info('[pcrplate={}] BEGIN pcrplate processing'.format(platebc))
 
          ##
+         ## CHECK IF RESYNC NEEDED
+         ##
+
+         r, status = lims_request('GET', results_url, params={'limit':10000, 'pcr_well__pcr_plate__barcode__exact':platebc})
+         if not assert_error(status == 200, '[pcrplate={}] error checking presence of RESULTS'.format(platebc)):
+            logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
+            digest['error'].append(platebc)
+            continue
+
+
+         res_objs = r.json()['objects']
+         if len(res_objs) > 0:
+            ##
+            ## RESYNC: DELETE CURRENT RESULTS
+            ##
+
+            logging.info('[pcrplate={}] results information is already in LIMS: RESYNC'.format(platebc))
+            resync = True
+
+            # Check first
+            if not assert_error(len(res_objs) <= 384, '[pcrplate={}] error when querying RESULTS for this plate, got {} objects'.format(platebc, len(res_objs))):
+               digest['error'].append(platebc)
+               continue
+
+            results_ids = [o['id'] for o in res_objs]
+
+            # Delete current results
+            for r_id in results_ids:
+               if not assert_error(r_id, '[pcrplate={}] avoiding full DELETE, for some reason results_id="". ABORT PLATE'.format(platebc, len(res_objs))):
+                  digest['error'].append(platebc)
+                  continue
+               del_uri = '{}/{}'.format(results_url, r_id)
+               lims_request('DELETE', del_uri)
+               logging.info('[pcrplate={}/results={}] deleted RESULTS entry in LIMS (uri: {})'.format(platebc,r_id,del_uri))
+
+         ##
          ## GET PCRWELLS
          ##
 
@@ -530,7 +565,6 @@ if __name__ == '__main__':
          if not assert_error(status == 200, '[pcrplate={}/pcrwell] error getting PCRWELLs for this PCRPLATE'.format(platebc)):
             logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
             digest['error'].append(platebc)
-            # Add to not_sync list
             continue
 
          # PCRWELL position is in A1, A2, B1 format
@@ -599,38 +633,6 @@ if __name__ == '__main__':
          results_outfile = '{}/{}_out.tsv'.format(outpath, platebc)
          rn_outfile = '{}/{}_rn.tsv'.format(outpath, platebc)
 
-
-         ##
-         ## CREATE QPCR RUN
-         ##
-
-         # pcrrun LIMS object
-         pcrrun_data = {
-            'id': None,
-            'pcr_plate': plateobj['resource_uri'],
-            'technician_id': None,
-            'pcr_run_instrument_id': None,
-            'pcr_run_protocol_id': None,
-            'date_run': date_parse(run_date).isoformat(),
-            'raw_results_file_path': fname,
-            'results_file_path': results_outfile,
-            'run_log_path': logpath,
-            'analysis_result_file_path': fname, #TODO: UPDATE PATH
-            'status': 'OK',
-            'comments': None
-         }
-
-         # POST request (pcrplate)
-         r, status = lims_request('POST', pcrrun_url, json_data=pcrrun_data)
-         if not assert_error(status == 201, '[pcrplate={}] error creating PCRRUN in LIMS'.format(platebc)):
-            logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
-            digest['error'].append(platebc)
-            # Add to not_sync list
-            continue
-
-         # Get new element uri
-         pcrrun_uri = r.headers['Location']
-         logging.info('[pcrplate={}/pcrrun] post(pcrrun) = {} (uri:{})'.format(platebc, status, pcrrun_uri))
 
          for row in results.iterrows():
             i = row[0]
@@ -785,6 +787,46 @@ if __name__ == '__main__':
             continue
          logging.info('[pcrplate={}/pcrwell] patch/update(pcrwell) = {}'.format(platebc, status))
 
+
+         ##
+         ## CREATE PCR RUN
+         ##
+
+         # Now create PCRRUN, this way if we don't reach this point it will trigger
+         # resync of the same sample in the next sync job.
+
+         # pcrrun LIMS object
+         pcrrun_data = {
+            'id': None,
+            'pcr_plate': plateobj['resource_uri'],
+            'technician_id': None,
+            'pcr_run_instrument_id': None,
+            'pcr_run_protocol_id': None,
+            'date_run': date_parse(run_date).isoformat(),
+            'raw_results_file_path': fname,
+            'results_file_path': results_outfile,
+            'run_log_path': logpath,
+            'analysis_result_file_path': fname,
+            'status': 'R',
+            'comments': None
+         }
+
+         # POST request (pcrplate)
+         r, status = lims_request('POST', pcrrun_url, json_data=pcrrun_data)
+         if not assert_error(status == 201, '[pcrplate={}] error creating PCRRUN in LIMS'.format(platebc)):
+            logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
+            digest['error'].append(platebc)
+            continue
+
+         # Log new element uri
+         pcrrun_uri = r.headers['Location']
+         logging.info('[pcrplate={}/pcrrun] post(pcrrun) = {} (uri:{})'.format(platebc, status, pcrrun_uri))
+
+
+         ##
+         ## STORE PARSED RESULTS FILE
+         ##
+
          # Store parsing output
          rn['bcd'] = platebc
          rnlist = rn.melt(id_vars=['bcd', 'well','rep'], var_name='cycle', value_name='Rn')
@@ -800,7 +842,7 @@ if __name__ == '__main__':
          logging.info('[pcrplate={}] SUCCESS pcrplate processing'.format(platebc))
 
          # Add to synced list
-         digest['success'].append(platebc)
+         digest['success'].append((platebc, resync))
 
    except AssertionError:
       # Flush log file
