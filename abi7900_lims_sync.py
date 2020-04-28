@@ -1,4 +1,7 @@
 import glob, sys, os, io, re
+import smtplib, ssl
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import argparse
 import requests
 import datetime
@@ -42,6 +45,8 @@ if LIMS_USER      is None or\
    print("ERROR: define environment variables LIMS_USER, LIMS_PASSWORD, LIMS_EMAIL_ADDRESS, LIMS_EMAIL_PASSWORD before running this script.")
    sys.exit(1)
 
+job_name = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+
 # API DEFINITIONS
 base_url           = 'https://orfeu.cnag.crg.eu'
 api_root           = '/prbblims_devel/api/covid19/'
@@ -79,7 +84,6 @@ def getOptions(args=sys.argv[1:]):
 ###
 
 def setup_logger(log_path):
-   job_name = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
    log_level = logging.INFO
    log_file = '{}/{}.log'.format(log_path, job_name)
    log_format = '[%(asctime)s][%(levelname)s]%(message)s'
@@ -93,43 +97,137 @@ def setup_logger(log_path):
 ### EMAIL NOTIFICATIONS
 ### 
 
-email_receivers = ["eduard.zorita@crg.eu"]
+email_receivers = ['eduard.zorita@crg.eu', 'eduardvalera@gmail.com']
 smtp_server     = "smtp.gmail.com"
 email_port      = 465
 
-def notify_errors():
-   import smtplib, ssl
-   if execution_error_critical != '':
-      subject = "[!] LIMS sync job {} failed".format(job_name)
-   elif execution_error_cnt > 0:
-      subject = "[!] LIMS sync job {} completed with errors".format(job_name)
-   elif execution_warning_cnt > 0:
-      subject = "[!] LIMS sync job {} completed with warnings".format(job_name)
-   else:
-      subject = "LIMS sync job {} completed successfully".format(job_name)      
-      
-   message = """\
-   Subject: {}
+def html_digest(digest, log_file):
+   # Convert digest lists to sets
+   digest['noinfo']  = list(set(digest['noinfo']))
+   digest['success'] = list(set(digest['success']))
+   digest['warning'] = list(set(digest['warning']))
+   digest['error']   = list(set(digest['error']))
+   
+   html = '<html><head><style>\nth, td { text-align: center; padding: 10px; }\ntable, th, td { border: 1px solid black; }\n</style></head><body>'
+   # Header with run description
+   html += '<h1>LIMS update report</h1>\n'
+   html += '<br><h2>Job description:</h2>\n'
+   html += '<ul><li><b>Job name:</b> <span style="font-family:\'Courier New\'">{}</span></li>'.format(job_name)
+   html += '<li><b>Command:</b> <span style="font-family:\'Courier New\'">{}</span></li>'.format(' '.join(sys.argv))
+   html += '<li><b>Working directory:</b> <span style="font-family:\'Courier New\'">{}</span></li>'.format(os.getcwd())
+   html += '<li><b>Log file:</b> <span style="font-family:\'Courier New\'">{}/{}</span></li>'.format(os.getcwd(),log_file)
+   html += '<li><b>Exit status:</b> <span style="font-family:\'Courier New\'">0</span></li></ul>\n'
+   
+   # Update summary
+   html += '<br><h2>Update summary:</h2>'
+   #  No info
+   if len(digest['noinfo']) > 0:
+      html += '<br>The following PCR runs <b>did not synchronize</b> because the PCR plate has not been pre-registered in LIMS:</b>\n<ul>'
+      for bcd in digest['noinfo']:
+         html += '<li>{}</li>'.format(bcd)
+      html += '</ul>'
+   #  Error
+   if len(digest['error']) > 0:
+      html += '<br>PCR plates with LIMS synchronization <b><span style="color:red">ERRORS</span></b>: (click to see log digest)\n<ul>'
+      for bcd in digest['error']:
+         html += '<li><a href="#{}error">{}</a></li>'.format(bcd, bcd)
+      html += '</ul>'
 
-   This message is sent from Python.""".format(subject)
+   #  Warning
+   if len(digest['warning']) > 0:
+      html += '<br>PCR plates with LIMS synchronization <b><span style="color:orange">WARNINGS</span></b>: (click to see log digest)\n<ul>'
+      for bcd in digest['warning']:
+         html += '<li><a href="#{}warn">{}</a></li>'.format(bcd, bcd)
+      html += '</ul>'
+
+   #  Success
+   if len(digest['success']) > 0:
+      html += '<br><b>List of synchronized PCR runs:</b>\n<ul>'
+      for bcd in digest['success']:
+         html += '<li>{}</li>'.format(bcd, bcd)
+      html += '</ul>'
+
+   # Control checks
+   html += '<br><h2>Control checks</h2>\n'
+
+   control_bcd = list(digest['control'].keys())
+   
+   if len(control_bcd) > 0:
+      # Table header
+      control_names = digest['control'][control_bcd[0]].keys()
+      html += '<table style="white-space:nowrap"><tr><th>PCR barcode</th>'
+      for cname in control_names:
+         html += '<th>{}</th>'.format(cname)
+      html += '</tr>'
+      
+      # Table content
+      for bcd in control_bcd:
+         html += '<tr><td>{}</td>'.format(bcd)
+         for ctl in digest['control'][bcd]:
+            conds = list(set(digest['control'][bcd][ctl]))
+            html += '<td>'
+            if len(conds) > 0:
+               for cond in conds:
+                  html += '<span style="color:{}"><b>{}</b></span>({}) '.format('green' if cond[1] == 'P' else 'red', 'Pass' if cond[1] == 'P' else 'Fail', cond[0])
+            else:
+               html += 'None'
+            html += '</td>'
+
+         html +='</tr>'
+      html += '</table>'
+         
+   else:
+      html += 'No control samples found!'
+
+   # Log digests
+   if len(digest['error']) > 0 or len(digest['warning']) > 0:
+
+      html += '<br><h2>Log digest</h2>\n'
+      # Error logs
+      if len(digest['error']) > 0:
+         # Grep error log from file
+         with open(log_file) as f:
+            error_lines = [line for line in f if re.search(r'ERROR', line)]
+            
+         html += '<h3>Error logs:</h3>'
+         for bcd in digest['error']:
+            pattern = 'pcrplate={}'.format(bcd)
+            html += '<br><a name="{}error"></a>Error log for {}:\n'.format(bcd,bcd)
+            html += '<br><p style="font-family:\'Courier New\'">{}</p><br>'.format('<br>'.join([line for line in error_lines if re.search(pattern, line)]))
+
+      # Warning logs
+      if len(digest['warning']) > 0:
+         # Grep warning log from log file
+         with open(log_file) as f:
+            warn_lines = [line for line in f if re.search(r'WARNING', line)]
+            
+         html += '<h3>Warning logs:</h3>'
+         for bcd in digest['warning']:
+            pattern = 'pcrplate={}'.format(bcd)
+            html += '<br><a name="{}warn"></a>Warning log for {}:\n'.format(bcd,bcd)
+            html += '<br><p style="font-family:\'Courier New\'">{}</p><br>'.format('<br>'.join([line for line in warn_lines if re.search(pattern, line)]))
+
+            
+   html += "</body></html>"
+
+   return MIMEText(html, 'html')
+
+
+def send_digest(digest, log_file):
+   message = MIMEMultipart()
+   message['Subject'] = "LIMS update report"
+   message['Bcc']     = ','.join(email_receivers)
+   message.attach(html_digest(digest, log_file))
    
    context = ssl.create_default_context()
    with smtplib.SMTP_SSL(smtp_server, email_port, context=context) as server:
-      server.login(email_sender, email_password)
-      server.sendmail(email_sender, email_receivers, message)
+      server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+      server.sendmail(EMAIL_SENDER, email_receivers, message.as_string())
 
       
 ###
 ### LOGGING / ERROR CONTROL
 ###
-
-execution_error_critical = ''
-execution_error_cnt      = 0
-execution_warning_cnt    = 0
-sync_successful          = []
-sync_warning             = []
-sync_error               = []
-
 
 def assert_critical(cond, msg):
    if not cond:
@@ -213,7 +311,7 @@ def parse_results(results_file):
             colnames = line.split('\t')
             break
       # Regex data rows
-      rows = [line for line in f_in if re.match(r'^[0-9]', line)]
+      rows = [line for line in f_in if re.search(r'^[0-9]', line)]
 
 
    # Create DataFrame
@@ -238,6 +336,16 @@ if __name__ == '__main__':
 
    # Set up logger
    logpath = setup_logger(options.logpath)
+
+   # Digest structure
+   digest = {
+      'skipped': [],
+      'noinfo':  [],
+      'success': [],
+      'warning': [],
+      'error':   [],
+      'control': {}
+   }
    
    # Test LIMS connection
    _, status = lims_request('GET', base_url)
@@ -254,13 +362,6 @@ if __name__ == '__main__':
    assert_critical(status < 300, 'Could not retreive pcr detectors from LIMS')
    detector_ids = {detector['name'].lower(): detector['resource_uri'] for detector in detectors.json()['objects']}
 
-   # Digest lists
-   pcr_skipped = []
-   pcr_noinfo  = []
-   pcr_warning = []
-   pcr_error   = []
-   pcr_synced  = []
-
    # Find all processed samples in path
    flist = glob.glob('{}/*_results.txt'.format(path))
    
@@ -271,7 +372,7 @@ if __name__ == '__main__':
       # Check if PCRPLATE is already in LIMS (TODO: also check if status is PROCESSING)
       if not assert_warning(platebc in pcrplates_barcodes, '[pcrplate={}] pcrplate/barcode not present in LIMS system, cannot sync data until it is created'.format(platebc)):
          logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
-         pcr_noinfo.append(platebc)
+         digest['noinfo'].append(platebc)
          # Add to not_sync list
          continue
 
@@ -287,14 +388,14 @@ if __name__ == '__main__':
       r, status = lims_request('GET', url=pcrrun_url, params={'pcr_plate__barcode__exact': platebc})
       if not assert_error(status == 200, '[pcrplate={}] error checking presence of PCRRUN'.format(platebc)):
          logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
-         pcr_error.append(platebc)
+         digest['error'].append(platebc)
          # Add to not_sync list
          continue
 
       if len(r.json()['objects']) > 0:
          logging.info("[pcrplate={}] pcrrun info already in LIMS".format(platebc))
          logging.info("[pcrplate={}] SKIP pcrplate processing".format(platebc))
-         pcr_skipped.append(platebc)
+         digest['skipped'].append(platebc)
          continue
 
       ##
@@ -312,6 +413,9 @@ if __name__ == '__main__':
          # Create a lookup table: well_position -> control type
          cp = {p['position'] : control_name for p in r.json()['objects']}
          control_type.update(cp)
+
+      # Prepare digest control structure
+      digest['control'][platebc] = {ct: list() for ct in control_amplif}
 
          
       ##
@@ -355,7 +459,7 @@ if __name__ == '__main__':
       r, status = lims_request('POST', pcrrun_url, json_data=pcrrun_data)
       if not assert_error(status == 201, '[pcrplate={}] error creating PCRRUN in LIMS'.format(platebc)):
          logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
-         pcr_error.append(platebc)
+         digest['error'].append(platebc)
          # Add to not_sync list
          continue
 
@@ -367,7 +471,7 @@ if __name__ == '__main__':
       r, status = lims_request('GET', url=pcrwell_url, params={'limit': 10000, 'pcr_plate__barcode__exact': platebc})
       if not assert_error(status == 200, '[pcrplate={}/pcrwell] error getting PCRWELLs for this PCRPLATE'.format(platebc)):
          logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
-         pcr_error.append(platebc)
+         digest['error'].append(platebc)
          # Add to not_sync list
          continue
 
@@ -390,7 +494,7 @@ if __name__ == '__main__':
          
          if not assert_warning(pcrwell_pos in pcrwell_pos_to_uri, '[pcrplate={}/pcrwell] well {} not found in LIMS'.format(platebc, pcrwell_pos)):
             logging.info('[pcrplate={}/pcrwell={}] ABORT pcrwell processing'.format(platebc, pcrwell_pos))
-            pcr_warning.append(platebc)
+            digest['warning'].append(platebc)
             continue
          
          ##
@@ -405,7 +509,7 @@ if __name__ == '__main__':
          # qPCR detector
          if not assert_warning(row['Detector Name'].lower() in detector_ids, '[pcrplate={}/pcrwell={}] detector {} not found in LIMS, setting to "None"'.format(platebc, pcrwell_pos, row['Detector Name'])):
             detector_id = None
-            pcr_warning.append(platebc)
+            digest['warning'].append(platebc)
          else:
             detector_id = detector_ids[row['Detector Name'].lower()]
 
@@ -423,7 +527,7 @@ if __name__ == '__main__':
             'ct': ct
          }
 
-         # Store amplification in diagnosis table
+         # Store amplification in diagnosis table (WARN: ASSUMES LOCAL SINGLEPLEX)
          if ((well_num-1)//24)%2:
             if (well_num-1)%2: # B2 (empty)
                dpos = None
@@ -445,7 +549,7 @@ if __name__ == '__main__':
          r, status = lims_request('POST', results_url, json_data=results_data)
          if not assert_error(status == 201, '[pcrplate={}/pcrwell={}/results] error creating results'.format(platebc, pcrwell_pos)):
             logging.info('[pcrplate={}/pcrwell={}] ABORT pcrwell processing'.format(platebc, pcrwell_pos))
-            pcr_error.append(platebc)
+            digest['error'].append(platebc)
             continue
 
          # Get new element uri
@@ -476,7 +580,7 @@ if __name__ == '__main__':
          _, status = lims_request('PATCH', amplification_url, json_data={'objects': amplification_data})
          if not assert_error(status < 300, '[pcrplate={}/pcrwell={}/amplificationdata] error in PATCH request to create Rn'.format(platebc, pcrwell_pos)):
             logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
-            pcr_error.append(platebc)
+            digest['error'].append(platebc)
             continue
          logging.info('[pcrplate={}/pcrwell={}/results/amplificationdata] patch/post(amplificationdata) = {}'.format(platebc, pcrwell_pos, status))
 
@@ -490,13 +594,20 @@ if __name__ == '__main__':
 
          # Check if control well has the expected amplification
          if pcrwell['position'] in control_type:
-            import pdb; pdb.set_trace()
             pass_fail = diagnosis[dpos] == control_amplif[control_type[pcrwell['position']]]
             pass_fail = 'P' if pass_fail else 'F'
 
-            if pass_fail == 'F':
-               # TODO: Report that control has failed.
-               pass
+            # Set control digest
+            # Find base position, this is the top left well of each singleplexed sample (WARN: ASSUMES LOCAL SINGLEPLEX)
+            if ((dpos-1)//24)%2:
+               base_pos = dpos-25 if (dpos-1)%2 else dpos-24
+            else:
+               base_pos = dpos-1 if (dpos-1)%2 else dpos
+               
+            # Convert to 'A1'->'Q24' w384 notation
+            w384_pos = chr(65+(base_pos-1)//24)+str((base_pos-1)%24+1)
+            digest['control'][platebc][control_type[w384_pos]].append((w384_pos, pass_fail))
+            
          else:
             pass_fail = 'NA'
             
@@ -509,7 +620,7 @@ if __name__ == '__main__':
       _, status = lims_request('PATCH', pcrwell_url, json_data={'objects': pcrwells})
       if not assert_error(status < 300, '[pcrplate={}/pcrwell] error in PATCH request to update pcrwell (autodiagnosis)'.format(platebc, pcrwell_pos)):
          logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
-         pcr_error.append(platebc)
+         digest['error'].append(platebc)
          continue
       logging.info('[pcrplate={}/pcrwell] patch/update(pcrwell) = {}'.format(platebc, status))
 
@@ -528,4 +639,13 @@ if __name__ == '__main__':
       logging.info('[pcrplate={}] SUCCESS pcrplate processing'.format(platebc))
 
       # Add to synced list
-      pcr_synced.append(platebc)
+      digest['success'].append(platebc)
+
+   # Except:
+   # Catch potential exceptions, this will capture if the script breaks
+   # Add info to digest
+
+   # Finally:
+   # Send digest
+   logging.shutdown()
+   send_digest(digest, logpath)
