@@ -97,7 +97,9 @@ email_port      = 465
 
 def html_digest(digest, log_file, tb):
    # Convert digest lists to sets
+   digest['nofile']  = list(set(digest['nofile']))
    digest['noinfo']  = list(set(digest['noinfo']))
+   digest['nowells']  = list(set(digest['nowells']))
    digest['success'] = list(set(digest['success']))
    digest['warning'] = list(set(digest['warning']))
    digest['error']   = list(set(digest['error']))
@@ -122,14 +124,35 @@ def html_digest(digest, log_file, tb):
       html += '<span style="font-family:\'Courier New\'">{}</span>'.format(tb.replace('<','&lt;').replace('>','&gt;').replace('\n','<br>'))
       
    # Update summaryn (only if there are samples to talk about)
-   if len(digest['noinfo']) > 0 or len(digest['error']) > 0 or len(digest['warning']) > 0 or len(digest['success']) > 0:
+   if len(digest['noinfo'])  > 0 or \
+      len(digest['nowells'])  > 0 or \
+      len(digest['error'])   > 0 or \
+      len(digest['warning']) > 0 or \
+      len(digest['success']) > 0 or \
+      len(digest['nowells']) > 0:
       html += '<br><h2>Update summary:</h2>'
+
+      #  No results file found
+      if len(digest['nofile']) > 0:
+         html += '<br>The following PCR runs <b>did not synchronize</b> because the PCR results have not been exported properly:</b>\n<ul>'
+         for bcd in digest['nofile']:
+            html += '<li>{} (expected files: \'{}_results.txt\', \'{}_clipped.txt\')</li>'.format(bcd, bcd, bcd)
+         html += '</ul>'
+      
       #  No info
       if len(digest['noinfo']) > 0:
          html += '<br>The following PCR runs <b>did not synchronize</b> because the PCR plate has not been pre-registered in LIMS:</b>\n<ul>'
          for bcd in digest['noinfo']:
             html += '<li>{}</li>'.format(bcd)
          html += '</ul>'
+         
+      #  No pcrwells found
+      if len(digest['nowells']) > 0:
+         html += '<br>The following PCR runs <b>did not synchronize</b> because no PCR wells were found in LIMS (did you create the well layout?):</b>\n<ul>'
+         for bcd in digest['nowells']:
+            html += '<li>{}</li>'.format(bcd)
+         html += '</ul>'
+
       #  Error
       if len(digest['error']) > 0:
          html += '<br>PCR plates with LIMS synchronization <b><span style="color:red">ERRORS</span></b>: (click to see log digest)\n<ul>'
@@ -349,7 +372,9 @@ if __name__ == '__main__':
       # Digest structure
       digest = {
          'skipped': [],
+         'nofile':  [],
          'noinfo':  [],
+         'nowells': [],
          'success': [],
          'warning': [],
          'error':   [],
@@ -376,7 +401,6 @@ if __name__ == '__main__':
 
       for fname in flist:
          platebc = fname.split('/')[-1].split('_results.txt')[0]
-         logging.info('[pcrplate={}] BEGIN pcrplate processing'.format(platebc))
 
          # Check if PCRPLATE is already in LIMS (TODO: also check if status is PROCESSING)
          if not assert_warning(platebc in pcrplates_barcodes, '[pcrplate={}] pcrplate/barcode not present in LIMS system, cannot sync data until it is created'.format(platebc)):
@@ -403,9 +427,37 @@ if __name__ == '__main__':
 
          if len(r.json()['objects']) > 0:
             logging.info("[pcrplate={}] pcrrun info already in LIMS".format(platebc))
-            logging.info("[pcrplate={}] SKIP pcrplate processing".format(platebc))
             digest['skipped'].append(platebc)
             continue
+
+         logging.info('[pcrplate={}] BEGIN pcrplate processing'.format(platebc))
+
+         ##
+         ## GET PCRWELLS
+         ##
+
+         # Get all PCRWELL for this PCRPLATE
+         r, status = lims_request('GET', url=pcrwell_url, params={'limit': 10000, 'pcr_plate__barcode__exact': platebc})
+         if not assert_error(status == 200, '[pcrplate={}/pcrwell] error getting PCRWELLs for this PCRPLATE'.format(platebc)):
+            logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
+            digest['error'].append(platebc)
+            # Add to not_sync list
+            continue
+
+         # PCRWELL position is in A1, A2, B1 format
+         pcrwells = r.json()['objects']
+
+         if not assert_warning(len(pcrwells) > 0, '[pcrplate={}] no pcrwells found in LIMS for this pcrplate'.format(platebc)):
+            digest['nowells'].append(platebc)
+            continue
+         else:
+            logging.info('[pcrplate={}/pcrwell] len(pcrplate={}/pcrwell) = {}'.format(platebc, platebc, len(pcrwells)))
+            
+         # Create a lookup table of well_position -> well_id
+         pcrwell_pos_to_uri = {p['position'].upper():p['resource_uri'] for p in pcrwells}
+
+         # Create diagnosis for each PCRWELL
+         diagnosis = [[None,None,None] for i in range(385)]
 
          ##
          ## GET CONTROL POSITIONS
@@ -431,9 +483,17 @@ if __name__ == '__main__':
          ## PARSE QPCR OUTPUT
          ##
 
-         # Parse results
+         # Check that results file exists
+         clipped_fname = '{}/{}_clipped.txt'.format(path, platebc)
+         if not assert_error(os.path.isfile(clipped_fname), '[pcrplate={}] qPCR results file not found: {}'.format(platebc, clipped_fname)):
+            digest['nofile'].append(platebc)
+            continue
+         
+         # Parse results file
          results, run_date = parse_results(fname)
-         rn, drn = parse_rn('{}/{}_clipped.txt'.format(path, platebc))
+
+         # Parse clipped file
+         rn, drn = parse_rn(clipped_fname)
 
          # Format results
          results['Ct'] = results['Ct'].apply(rename_Ct)
@@ -475,24 +535,6 @@ if __name__ == '__main__':
          # Get new element uri
          pcrrun_uri = r.headers['Location']
          logging.info('[pcrplate={}/pcrrun] post(pcrrun) = {} (uri:{})'.format(platebc, status, pcrrun_uri))
-
-         # Get all PCRWELL for this PCRPLATE
-         r, status = lims_request('GET', url=pcrwell_url, params={'limit': 10000, 'pcr_plate__barcode__exact': platebc})
-         if not assert_error(status == 200, '[pcrplate={}/pcrwell] error getting PCRWELLs for this PCRPLATE'.format(platebc)):
-            logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
-            digest['error'].append(platebc)
-            # Add to not_sync list
-            continue
-
-         # PCRWELL position is in A1, A2, B1 format
-         pcrwells = r.json()['objects']
-         logging.info('[pcrplate={}/pcrwell] len(pcrplate={}/pcrwell) = {}'.format(platebc, platebc, len(pcrwells)))
-
-         # Create a lookup table of well_position -> well_id
-         pcrwell_pos_to_uri = {p['position'].upper():p['resource_uri'] for p in pcrwells}
-
-         # Create diagnosis for each PCRWELL
-         diagnosis = [[None,None,None] for i in range(385)]
 
          for row in results.iterrows():
             i = row[0]
@@ -668,5 +710,11 @@ if __name__ == '__main__':
       # Flush log file
       logging.shutdown()
       # Send digest e-mail if there is something interesting to report
-      if tb or len(digest['error']) > 0 or len(digest['warning']) > 0 or len(digest['success']) > 0 or len(digest['noinfo']) > 0:
+      if tb \
+         or len(digest['error']) > 0 \
+         or len(digest['warning']) > 0\
+         or len(digest['success']) > 0\
+         or len(digest['noinfo']) > 0\
+         or len(digest['nofile']) > 0\
+         or len(digest['nowells']) > 0:
          send_digest(digest, logpath, tb)
