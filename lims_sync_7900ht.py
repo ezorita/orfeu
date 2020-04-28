@@ -353,6 +353,7 @@ def html_digest(digest, log_file, tb):
 
 def send_digest(digest, log_file, tb=None):
    message = MIMEMultipart()
+   message['From']    = 'PRBB LIMS <{}>'.format(EMAIL_SENDER)
    message['Subject'] = "LIMS update {} ({})".format('report' if tb is None else 'FAILED', job_name)
    message['Bcc']     = ','.join(email_receivers)
    message.attach(html_digest(digest, log_file, tb))
