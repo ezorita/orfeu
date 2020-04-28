@@ -153,9 +153,12 @@ def html_digest(digest, log_file, tb):
    job_end = datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')
    
    html = '<html><head><style>\nth, td { text-align: center; padding: 10px; }\ntable, th, td { border: 1px solid black; }\n</style></head><body>'
+   html_index = '- <a href="#description">Job description</a><br>'
+   
    # Header with run description
    html += '<h1>LIMS update report</h1>\n'
-   html += '<br><h2>Job description:</h2>\n'
+   html += 'HTML_REPORT_INDEX'
+   html += '<br><h2><a name="description"></a>Job description:</h2>\n'
    html += '<ul><li><b>Job name:</b> <span style="font-family:\'Courier New\'">{}</span></li>'.format(job_name)
    html += '<li><b>Job start:</b> <span style="font-family:\'Courier New\'">{}</span></li>'.format(job_start)
    html += '<li><b>Job end:</b> <span style="font-family:\'Courier New\'">{}</span></li>'.format(job_end)
@@ -177,7 +180,8 @@ def html_digest(digest, log_file, tb):
       len(digest['warning']) > 0 or \
       len(digest['success']) > 0 or \
       len(digest['nowells']) > 0:
-      html += '<br><h2>Update summary:</h2>'
+      html_index += '- <a href="#summary">Update summary</a><br>'
+      html += '<br><h2><a name="summary"></a>Update summary:</h2>'
 
       #  No results file found
       if len(digest['nofile']) > 0:
@@ -222,7 +226,8 @@ def html_digest(digest, log_file, tb):
          html += '</ul>'
 
          # Sample stats
-         html += '<br><h2>Sample stats</h2>\n'
+         html_index += '- <a href="#stats">Sample stats</a><br>'
+         html += '<br><h2><a name="stats"></a>Sample stats</h2>\n'
          html += '<table style="white-space:nowrap;"><tr>\
             <th>PCR barcode</th>\
             <th>Total Samples</th>\
@@ -259,7 +264,8 @@ def html_digest(digest, log_file, tb):
          # PCR plate viz
 
          # Legend
-         html += '<br><h2>Sample visualization</h2>\n'
+         html_index += '- <a href="#sampviz">Sample visualization</a><br>'
+         html += '<br><h2><a name="sampviz"></a>Sample visualization</h2>\n'
          html += '<table style="white-space:nowrap; empty-cells: show;"><tr>'
          html += '<td style="background-color:{}">&nbsp;</td><td>Negative</td>'.format(status_color[status_code['N']])
          html += '<td style="background-color:{}">&nbsp;</td><td>Positive</td>'.format(status_color[status_code['P']])
@@ -287,7 +293,8 @@ def html_digest(digest, log_file, tb):
                html += '</tr>'
             html += '</table>'
          # Control checks
-         html += '<br><h2>Control checks</h2>\n'
+         html_index += '- <a href="#controls">Control checks</a><br>'
+         html += '<br><h2><a name="controls"></a>Control checks</h2>\n'
 
          control_bcd = list(digest['control'].keys())
 
@@ -320,8 +327,8 @@ def html_digest(digest, log_file, tb):
 
       # Log digests
       if len(digest['error']) > 0 or len(digest['warning']) > 0:
-
-         html += '<br><h2>Log digest</h2>\n'
+         html_index += '- <a href="#logs">Log digest</a><br>'
+         html += '<br><h2><a name="logs"></a>Log digest</h2>\n'
          # Error logs
          if len(digest['error']) > 0:
             # Grep error log from file
@@ -348,6 +355,9 @@ def html_digest(digest, log_file, tb):
 
             
    html += "</body></html>"
+
+   # Add index at the top
+   html = html.replace('HTML_REPORT_INDEX', html_index)
 
    return MIMEText(html, 'html')
 
@@ -455,7 +465,7 @@ if __name__ == '__main__':
    outpath = options.output
 
    # Set up logger
-   logpath = setup_logger(options.logpath)
+   logpath = setup_logger(options.logpath).replace('//','/')
 
    try:
       # Digest structure
