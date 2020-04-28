@@ -1,4 +1,9 @@
-import glob, sys, os, io, re
+# Requires Python version 3.5 or higher
+import sys
+if sys.version_info < (3,5):
+      raise ImportError('Python version < 3.5 not supported')
+
+import glob, os, io, re
 import smtplib, ssl
 import traceback
 from email.mime.text import MIMEText
