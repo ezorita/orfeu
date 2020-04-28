@@ -171,6 +171,7 @@ def html_digest(digest, log_file, tb):
       
    # Update summaryn (only if there are samples to talk about)
    if len(digest['noinfo'])  > 0 or \
+      len(digest['nofile'])  > 0 or \
       len(digest['nowells'])  > 0 or \
       len(digest['error'])   > 0 or \
       len(digest['warning']) > 0 or \
@@ -182,7 +183,7 @@ def html_digest(digest, log_file, tb):
       if len(digest['nofile']) > 0:
          html += '<br>The following PCR runs <b>did not synchronize</b> because the PCR results have not been exported properly:</b>\n<ul>'
          for bcd in digest['nofile']:
-            html += '<li>{} (expected files: \'{}_results.txt\', \'{}_clipped.txt\')</li>'.format(bcd, bcd, bcd)
+            html += '<li>{}</li>'.format(bcd)
          html += '</ul>'
       
       #  No info
@@ -610,14 +611,36 @@ if __name__ == '__main__':
 
 
          ##
-         ## PARSE QPCR OUTPUT
+         ## PARSE PCR OUTPUT FILES
          ##
 
          # Check that results file exists
          clipped_fname = '{}/{}_clipped.txt'.format(path, platebc)
-         if not assert_error(os.path.isfile(clipped_fname), '[pcrplate={}] qPCR results file not found: {}'.format(platebc, clipped_fname)):
+         if not assert_error(os.path.isfile(fname), '[pcrplate={}] qPCR results file not found: {}'.format(platebc, fname)):
+            digest['error'].append(platebc)
             digest['nofile'].append(platebc)
             continue
+
+         if not assert_error(os.path.isfile(clipped_fname), '[pcrplate={}] qPCR clipped file not found: {}'.format(platebc, clipped_fname)):
+            digest['error'].append(platebc)
+            digest['nofile'].append(platebc)
+            continue
+
+         # Check _results.txt file header
+         with open(fname) as f:
+            firstline = f.readline()
+            if not assert_error(re.search('Results',firstline), '[pcrplate={}] SDS Results header not found in: {}'.format(platebc, fname)):
+               digest['error'].append(platebc)
+               digest['nofile'].append(platebc)
+               continue
+               
+         # Check _clipped.txt file header
+         with open(clipped_fname) as f:
+            firstline = f.readline()
+            if not assert_error(re.search('Clipped',firstline), '[pcrplate={}] SDS Clipped header not found in: {}'.format(platebc, clipped_fname)):
+               digest['error'].append(platebc)
+               digest['nofile'].append(platebc)
+               continue
          
          # Parse results file
          results, run_date = parse_results(fname)
