@@ -438,7 +438,7 @@ def parse_results(results_file):
          if 'Run DateTime' in line:
             run_date = line.rstrip().split('\t')[-1]
          if line[0:4] == 'Well':
-            colnames = line.split('\t')
+            colnames = line.rstrip().split('\t')
             break
       # Regex data rows
       rows = [line for line in f_in if re.search(r'^[0-9]', line)]
@@ -531,6 +531,7 @@ if __name__ == '__main__':
 
          logging.info('[pcrplate={}] BEGIN pcrplate processing'.format(platebc))
 
+
          ##
          ## CHECK IF RESYNC NEEDED
          ##
@@ -566,6 +567,7 @@ if __name__ == '__main__':
                del_uri = '{}/{}'.format(results_url, r_id)
                lims_request('DELETE', del_uri)
                logging.info('[pcrplate={}/results={}] deleted RESULTS entry in LIMS (uri: {})'.format(platebc,r_id,del_uri))
+
 
          ##
          ## GET PCRWELLS
@@ -660,7 +662,7 @@ if __name__ == '__main__':
 
          # Format results
          results['Ct'] = results['Ct'].apply(rename_Ct)
-         results['plate_barcode'] = platebc
+         results['pcrplate'] = platebc
 
          # Format parsed output paths
          results_outfile = '{}/{}_out.tsv'.format(outpath, platebc)
