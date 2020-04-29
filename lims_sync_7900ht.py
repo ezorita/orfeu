@@ -1,7 +1,7 @@
 # Requires Python version 3.5 or higher
 import sys
-if sys.version_info < (3,5):
-      raise ImportError('Python version < 3.5 not supported')
+if sys.version_info < (3,0):
+      raise ImportError('Python version < 3.0 not supported')
 
 import glob, os, io, re
 import smtplib, ssl
