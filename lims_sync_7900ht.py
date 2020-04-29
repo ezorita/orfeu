@@ -48,7 +48,7 @@ job_start = datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')
 
 # API DEFINITIONS
 base_url           = 'https://orfeu.cnag.crg.eu'
-api_root           = '/prbblims_devel/api/covid19/'
+api_root           = '/prbblims/api/covid19/'
 pcrplate_base      = '{}pcrplate/'.format(api_root)
 pcrrun_base        = '{}pcrrun/'.format(api_root)
 pcrwell_base       = '{}pcrwell/'.format(api_root)
@@ -137,7 +137,7 @@ def compute_diagnosis(samples):
 ### EMAIL NOTIFICATIONS
 ### 
 
-email_receivers = ['eduard.zorita@crg.eu']
+email_receivers = ['eduard.zorita@crg.eu', 'labcovid19@crg.eu']
 smtp_server     = "smtp.gmail.com"
 email_port      = 465
 
@@ -666,7 +666,7 @@ if __name__ == '__main__':
          results_outfile = '{}/{}_out.tsv'.format(outpath, platebc)
          rn_outfile = '{}/{}_rn.tsv'.format(outpath, platebc)
 
-
+         fail_flag = False
          for row in results.iterrows():
             i = row[0]
             row = row[1]
@@ -732,7 +732,8 @@ if __name__ == '__main__':
             if not assert_error(status == 201, '[pcrplate={}/pcrwell={}/results] error creating results'.format(platebc, pcrwell_pos)):
                logging.info('[pcrplate={}/pcrwell={}] ABORT pcrwell processing'.format(platebc, pcrwell_pos))
                digest['error'].append(platebc)
-               continue
+               fail_flag = True
+               break
 
             # Get new element uri
             results_uri = r.headers['Location']
@@ -763,16 +764,20 @@ if __name__ == '__main__':
             if not assert_error(status < 300, '[pcrplate={}/pcrwell={}/amplificationdata] error in PATCH request to create Rn'.format(platebc, pcrwell_pos)):
                logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
                digest['error'].append(platebc)
-               continue
+               fail_flag = True
+               break
             logging.info('[pcrplate={}/pcrwell={}/results/amplificationdata] patch/post(amplificationdata) = {}'.format(platebc, pcrwell_pos, status))
 
 
+         if fail_flag:
+            continue
          ##
          ## AUTOMATIC DIAGNOSIS (SINGLEPLEX SPECIFIC CODE)
          ##
 
          for pcrwell in pcrwells:
             dpos = int((ord(pcrwell['position'][0].upper())-65)*24 + int(pcrwell['position'][1:]))
+            auto_diagnosis = compute_diagnosis(diagnosis[dpos])
             
             # Find base position, this is the top left well of each singleplexed sample (WARN: ASSUMES LOCAL SINGLEPLEX)
             if ((dpos-1)//24)%2:
@@ -783,7 +788,6 @@ if __name__ == '__main__':
             # Find row/column in 96-well plate
             row = (base_pos-1)//48
             col = ((base_pos-1)%48)//2
-
 
             # Check if control well has the expected amplification
             if pcrwell['position'] in control_type:
@@ -799,8 +803,6 @@ if __name__ == '__main__':
                
             else:
                pass_fail = 'NA'
-               auto_diagnosis = compute_diagnosis(diagnosis[dpos])
-
                # Store sample diagnosis in sample digest
                digest['sample'][platebc][row][col] = status_code['NAD' if auto_diagnosis is None else auto_diagnosis]
 
