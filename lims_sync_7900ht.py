@@ -137,7 +137,7 @@ def compute_diagnosis(samples):
 ### EMAIL NOTIFICATIONS
 ### 
 
-email_receivers = ['eduard.zorita@crg.eu', 'labcovid19@crg.eu']
+email_receivers = ['']
 smtp_server     = "smtp.gmail.com"
 email_port      = 465
 
@@ -165,7 +165,7 @@ def html_digest(digest, log_file, tb):
    html += '<li><b>Script version:</b> <span style="font-family:\'Courier New\'">{}</span></li>'.format(__version__)   
    html += '<li><b>Command:</b> <span style="font-family:\'Courier New\'">{}</span></li>'.format(' '.join(sys.argv))
    html += '<li><b>Working directory:</b> <span style="font-family:\'Courier New\'">{}</span></li>'.format(os.getcwd())
-   html += '<li><b>Log file:</b> <span style="font-family:\'Courier New\'">{}/{}</span></li>'.format(os.getcwd(),log_file)
+   html += '<li><b>Log file:</b> <span style="font-family:\'Courier New\'">{}</span></li>'.format(log_file)
    html += '<li><b>Exit status:</b> <span style="font-family:\'Courier New\'">{}</span></li></ul>\n'.format(1 if tb else 0)
 
    if tb:
