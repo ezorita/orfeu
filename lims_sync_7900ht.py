@@ -31,16 +31,18 @@ control_amplif = {
 }
 
 # Get environment variables
-LIMS_USER      = os.environ.get('LIMS_USER')
-LIMS_PASSWORD  = os.environ.get('LIMS_PASSWORD')
-EMAIL_SENDER   = os.environ.get('LIMS_EMAIL_ADDRESS')
-EMAIL_PASSWORD = os.environ.get('LIMS_EMAIL_PASSWORD')
+LIMS_USER       = os.environ.get('LIMS_USER')
+LIMS_PASSWORD   = os.environ.get('LIMS_PASSWORD')
+EMAIL_SENDER    = os.environ.get('LIMS_EMAIL_ADDRESS')
+EMAIL_PASSWORD  = os.environ.get('LIMS_EMAIL_PASSWORD')
+EMAIL_RECEIVERS = os.environ.get('LIMS_EMAIL_RECEIVERS')
 
-if LIMS_USER      is None or\
-   LIMS_PASSWORD  is None or\
-   EMAIL_SENDER   is None or\
-   EMAIL_PASSWORD is None:
-   print("ERROR: define environment variables LIMS_USER, LIMS_PASSWORD, LIMS_EMAIL_ADDRESS, LIMS_EMAIL_PASSWORD before running this script.")
+if LIMS_USER       is None or\
+   LIMS_PASSWORD   is None or\
+   EMAIL_SENDER    is None or\
+   EMAIL_RECEIVERS is None or\
+   EMAIL_PASSWORD  is None:
+   print("ERROR: define environment variables LIMS_USER, LIMS_PASSWORD, LIMS_EMAIL_ADDRESS, LIMS_EMAIL_PASSWORD, LIMS_EMAIL_RECEIVERS before running this script.")
    sys.exit(1)
 
 job_name  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -137,9 +139,9 @@ def compute_diagnosis(samples):
 ### EMAIL NOTIFICATIONS
 ### 
 
-email_receivers = ['']
 smtp_server     = "smtp.gmail.com"
 email_port      = 465
+email_receivers = EMAIL_RECEIVERS.split(',')
 
 def html_digest(digest, log_file, tb):
    # Convert digest lists to sets
