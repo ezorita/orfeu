@@ -469,6 +469,14 @@ if __name__ == '__main__':
    # Set up logger
    logpath = setup_logger(options.logpath).replace('//','/')
 
+   # Log job info
+   logging.info(' version:  {}'.format(__version__))
+   logging.info(' job name: {}'.format(job_name))
+   logging.info(' command:  {}'.format(' '.join(sys.argv)))
+   logging.info(' workdir:  {}'.format(os.getcwd()))
+   logging.info(' logfile:  {}'.format(logpath))
+   logging.info(' report:   {}'.format(EMAIL_RECEIVERS))
+
    try:
       # Digest structure
       digest = {
