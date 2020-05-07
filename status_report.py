@@ -131,7 +131,7 @@ def html_digest(report, tb):
                continue
 
             html += '<tr>'
-            html += '<td>{}</td><td>{}</td><td>{}</td><td>{}</td><td{}>{}</td><td{}>{}</td><td{}>{}</td>'.format(
+            html += '<td><b>{}</b></td><td>{}</td><td>{}</td><td>{}</td><td{}>{}</td><td{}>{}</td><td{}>{}</td>'.format(
                pcr['barcode'],
                proj['name'],
                proj['org'],
