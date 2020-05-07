@@ -15,7 +15,7 @@ import logging
 from dateutil.parser import parse as date_parse
 import pandas as pd
 
-__version__ = '0.10'
+__version__ = '0.11'
 
 # TODO: How to handle unfinished syncs (i.e. the connection broke during sync) --> verify script
 #
@@ -174,10 +174,9 @@ def html_digest(digest, log_file, tb):
       html += '<br><h2>Cause of failure:</h2>'
       html += '<span style="font-family:\'Courier New\'">{}</span>'.format(tb.replace('<','&lt;').replace('>','&gt;').replace('\n','<br>'))
       
-   # Update summaryn (only if there are samples to talk about)
+   # Update summary (only if there are samples to talk about)
    if len(digest['noinfo'])  > 0 or \
       len(digest['nofile'])  > 0 or \
-      len(digest['nowells'])  > 0 or \
       len(digest['error'])   > 0 or \
       len(digest['warning']) > 0 or \
       len(digest['success']) > 0 or \
@@ -244,7 +243,7 @@ def html_digest(digest, log_file, tb):
                      
          for bcd in digest['sample']:
             # Compute sample frequencies
-            freq = pd.Series([c for r in digest['sample'][bcd] for c in r]).value_counts()
+            freq = pd.Series([c[0] for r in digest['sample'][bcd] for c in r]).value_counts()
             for s in status_code:
                if not status_code[s] in freq.index:
                   freq[status_code[s]] = 0
@@ -268,15 +267,15 @@ def html_digest(digest, log_file, tb):
          # Legend
          html_index += '- <a href="#sampviz">Sample visualization</a><br>'
          html += '<br><h2><a name="sampviz"></a>Sample visualization</h2>\n'
-         html += '<table style="white-space:nowrap; empty-cells: show;"><tr>'
+         html += '<table style="white-space:nowrap; empty-cells: show; border: 0px;"><tr>'
          html += '<td style="background-color:{}">&nbsp;</td><td>Negative</td>'.format(status_color[status_code['N']])
          html += '<td style="background-color:{}">&nbsp;</td><td>Positive</td>'.format(status_color[status_code['P']])
          html += '<td style="background-color:{}">&nbsp;</td><td>Inconclusive</td>'.format(status_color[status_code['I']])
-         html += '<td style="background-color:{}">&nbsp;</td><td>No-AD</td>'.format(status_color[status_code['NAD']])
-         html += '<td style="background-color:{}">&nbsp;</td><td>Empty</td>'.format(status_color[status_code['EMP']])
          html += '<td style="background-color:{}">&nbsp;</td><td>Control OK</td>'.format(status_color[status_code['PCT']])
          html += '<td style="background-color:{}">&nbsp;</td><td>Control FAIL</td>'.format(status_color[status_code['FCT']])
-         html += '</tr></table>'
+         html += '<td style="background-color:{}">&nbsp;</td><td>Empty</td>'.format(status_color[status_code['EMP']])
+         html += '<td style="background-color:{}">&nbsp;</td><td>No autodiag</td>'.format(status_color[status_code['NAD']])
+         html += '<td style="border: 2px solid red;">&nbsp;</td><td>No Rp</td></tr></table>'
          for bcd in digest['sample']:
             html += '<h3>PCR run: {}</h3>\n'.format(bcd)
 
@@ -291,7 +290,7 @@ def html_digest(digest, log_file, tb):
             for i, r in enumerate(digest['sample'][bcd]):
                html += '<tr><th><span style="font-family:\'Courier New\'">{}</span></th>'.format(chr(65+i))
                for c in r:
-                  html += '<td style="background-color:{}">&nbsp;</td>'.format(status_color[c])
+                  html += '<td style="background-color:{};{}">&nbsp;</td>'.format(status_color[c[0]], '' if c[1] or c[0] == status_code['EMP'] else 'border: 2px solid red;')
                html += '</tr>'
             html += '</table>'
          # Control checks
@@ -626,7 +625,7 @@ if __name__ == '__main__':
          ##
 
          # Prepare digest sample structure
-         digest['sample'][platebc]  = [[status_code['EMP']]*12 for x in range(8)]
+         digest['sample'][platebc] = [[[status_code['EMP'], None] for y in range(12)] for x in range(8)]
 
          # Prepare digest control structure
          digest['control'][platebc] = {ct: list() for ct in control_amplif}
@@ -801,6 +800,9 @@ if __name__ == '__main__':
             row = (base_pos-1)//48
             col = ((base_pos-1)%48)//2
 
+            # Report no Rp amplification
+            digest['sample'][platebc][row][col][1] = diagnosis[dpos][2]
+
             # Check if control well has the expected amplification
             if pcrwell['position'] in control_type:
                pass_fail = diagnosis[dpos] == control_amplif[control_type[pcrwell['position']]]
@@ -811,12 +813,12 @@ if __name__ == '__main__':
                digest['control'][platebc][control_type[w384_pos]].append((w384_pos, pass_fail))
                
                # Store control status in sample digest
-               digest['sample'][platebc][row][col] = status_code['PCT' if pass_fail == 'P' else 'FCT']
+               digest['sample'][platebc][row][col][0] = status_code['PCT' if pass_fail == 'P' else 'FCT']
                
             else:
                pass_fail = 'NA'
                # Store sample diagnosis in sample digest
-               digest['sample'][platebc][row][col] = status_code['NAD' if auto_diagnosis is None else auto_diagnosis]
+               digest['sample'][platebc][row][col][0] = status_code['NAD' if auto_diagnosis is None else auto_diagnosis]
 
             pcrwell['pass_fail'] = pass_fail
             pcrwell['automatic_diagnosis'] = auto_diagnosis
