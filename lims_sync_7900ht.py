@@ -15,7 +15,7 @@ import logging
 from dateutil.parser import parse as date_parse
 import pandas as pd
 
-__version__ = '0.11'
+__version__ = '0.12'
 
 # TODO: How to handle unfinished syncs (i.e. the connection broke during sync) --> verify script
 #
@@ -422,16 +422,71 @@ def lims_request(method, url, params=None, json_data=None, headers=req_headers):
 ### DATA PARSING METHODS
 ###
 
-def parse_rn(clipped_file):
+def parse_viia7(results_file):
+   with open(results_file) as f_in:
+      run_date = None
+      # Catch headers
+      for line in f_in:
+         if 'Run End Time' in line:
+            run_date = line.rstrip().split('= ')[-1]
+            run_date = run_date.replace(' AM','').replace(' PM','')
+            break
+
+      for line in f_in:
+         if '[Amplification Data]' in line:
+            rn_colnames = f_in.readline().rstrip().split('\t')
+            break
+
+      rn_text = ''
+      for line in f_in:
+         if line.rstrip() == '':
+            break
+         rn_text += line
+
+      for line in f_in:
+         if '[Results]' in line:
+            res_colnames = f_in.readline().rstrip().split('\t')
+            break
+
+      res_text = ''
+      for line in f_in:
+         if line.rstrip() == '':
+            break
+         res_text += line
+
+      # Results dataframe
+      data = pd.read_csv(io.StringIO(res_text), delimiter='\t', names=res_colnames)
+      data = data.rename(columns = {'CT': 'Ct', 'Ct Threshold': 'Threshold', 'Target Name': 'Detector Name'})
+      
+      # Rn dataframe
+      rn = pd.read_csv(io.StringIO(rn_text), delim_whitespace=True, names=['well', 'cycle', 'rep', 'Rn', 'Delta Rn'])
+
+      return data, rn, run_date
+
+def parse_7900ht(results_file, clipped_file):
+   data, run_date = parse_7900ht_results(results_file)
+   rn             = parse_7900ht_rn(clipped_file)
+
+   return data, rn, run_date
+
+def parse_7900ht_rn(clipped_file):
    data = pd.read_csv(clipped_file, sep='\t', skiprows=1, header=0, index_col=False)
    info = pd.DataFrame({'well': data.iloc[:,0], 'rep': data.iloc[:,1]})
    
    # Split Rn and Delta_Rn in two DataFrames
    rn  = pd.concat([info , data.iloc[:,data.columns.get_loc('Rn')+1:data.columns.get_loc('Delta Rn')]], axis=1)
    drn = pd.concat([info, data.iloc[:,data.columns.get_loc('Delta Rn')+1:]], axis=1)
-   return rn, drn
 
-def parse_results(results_file):
+   rn  = rn.melt(id_vars=['well', 'rep'], var_name='cycle', value_name='Rn')
+   drn  = drn.melt(id_vars=['well', 'rep'], var_name='cycle', value_name='Delta Rn')
+   drn['cycle'] = drn['cycle'].apply(lambda x: x.split('.')[0])
+
+   rn_all = rn.merge(right=drn, on=['well', 'rep', 'cycle'])
+   rn_all['cycle'] = rn_all['cycle'].astype(int)
+   
+   return rn_all
+
+def parse_7900ht_results(results_file):
    with open(results_file) as f_in:
       run_date = None
       # Catch headers
@@ -451,7 +506,7 @@ def parse_results(results_file):
    return data, run_date
 
 def rename_Ct(x):
-   return 'NA' if x in ['Unknown','Undetermined'] else x
+   return 'NA' if x in ['Unknown','Undetermined','None'] else x
 
 
 ###
@@ -539,6 +594,61 @@ if __name__ == '__main__':
             continue
 
          logging.info('[pcrplate={}] BEGIN pcrplate processing'.format(platebc))
+
+
+         ##
+         ## PARSE PCR OUTPUT FILES
+         ##
+
+         # Check that results file exists
+         clipped_fname = '{}/{}_clipped.txt'.format(path, platebc)
+         if not assert_error(os.path.isfile(fname), '[pcrplate={}] qPCR results file not found: {}'.format(platebc, fname)):
+            digest['error'].append(platebc)
+            digest['nofile'].append(platebc)
+            continue
+
+         # Check _results.txt file header (parse machine type)
+         parser = ''
+         with open(fname) as f:
+            firstline = f.readline()
+            if firstline[0] == '*':
+               parser = 'viia7'
+            elif re.search('Results',firstline):
+               parser = '7900ht'
+            else:
+               assert_error(False, '[pcrplate={}] SDS Results header not found in: {}'.format(platebc, fname))
+               digest['error'].append(platebc)
+               digest['nofile'].append(platebc)
+               continue
+
+
+         if parser == '7900ht':
+            if not assert_error(os.path.isfile(clipped_fname), '[pcrplate={}] qPCR clipped file not found: {}'.format(platebc, clipped_fname)):
+               digest['error'].append(platebc)
+               digest['nofile'].append(platebc)
+               continue
+
+
+            # Check _clipped.txt file header
+            with open(clipped_fname) as f:
+               firstline = f.readline()
+               if not assert_error(re.search('Clipped',firstline), '[pcrplate={}] SDS Clipped header not found in: {}'.format(platebc, clipped_fname)):
+                  digest['error'].append(platebc)
+                  digest['nofile'].append(platebc)
+                  continue
+
+            results, rn, run_date = parse_7900ht(fname, clipped_fname)
+         
+         elif parser == 'viia7':
+            results, rn, run_date = parse_viia7(fname)
+                  
+         # Format results
+         results['Ct'] = results['Ct'].apply(rename_Ct)
+         results['pcrplate'] = platebc
+
+         # Format parsed output paths
+         results_outfile = '{}/{}_out.tsv'.format(outpath, platebc)
+         rn_outfile = '{}/{}_rn.tsv'.format(outpath, platebc)
 
 
          ##
@@ -631,51 +741,9 @@ if __name__ == '__main__':
          digest['control'][platebc] = {ct: list() for ct in control_amplif}
 
 
-         ##
-         ## PARSE PCR OUTPUT FILES
-         ##
-
-         # Check that results file exists
-         clipped_fname = '{}/{}_clipped.txt'.format(path, platebc)
-         if not assert_error(os.path.isfile(fname), '[pcrplate={}] qPCR results file not found: {}'.format(platebc, fname)):
-            digest['error'].append(platebc)
-            digest['nofile'].append(platebc)
-            continue
-
-         if not assert_error(os.path.isfile(clipped_fname), '[pcrplate={}] qPCR clipped file not found: {}'.format(platebc, clipped_fname)):
-            digest['error'].append(platebc)
-            digest['nofile'].append(platebc)
-            continue
-
-         # Check _results.txt file header
-         with open(fname) as f:
-            firstline = f.readline()
-            if not assert_error(re.search('Results',firstline), '[pcrplate={}] SDS Results header not found in: {}'.format(platebc, fname)):
-               digest['error'].append(platebc)
-               digest['nofile'].append(platebc)
-               continue
-               
-         # Check _clipped.txt file header
-         with open(clipped_fname) as f:
-            firstline = f.readline()
-            if not assert_error(re.search('Clipped',firstline), '[pcrplate={}] SDS Clipped header not found in: {}'.format(platebc, clipped_fname)):
-               digest['error'].append(platebc)
-               digest['nofile'].append(platebc)
-               continue
-         
-         # Parse results file
-         results, run_date = parse_results(fname)
-
-         # Parse clipped file
-         rn, drn = parse_rn(clipped_fname)
-
-         # Format results
-         results['Ct'] = results['Ct'].apply(rename_Ct)
-         results['pcrplate'] = platebc
-
-         # Format parsed output paths
-         results_outfile = '{}/{}_out.tsv'.format(outpath, platebc)
-         rn_outfile = '{}/{}_rn.tsv'.format(outpath, platebc)
+         ###
+         ### UPLOAD RESULTS
+         ###
 
          fail_flag = False
          for row in results.iterrows():
@@ -714,7 +782,8 @@ if __name__ == '__main__':
                'date_analysis': datetime.datetime.now().isoformat(),
                'date_sent': datetime.datetime.now().isoformat(),
                'amplification': amplification,
-               'threshold': threshold,
+               #'threshold': threshold,
+               'threshold': default_ct_threshold,
                'detector': detector_id,
                'detector_lot_number': None,
                'ct': ct
@@ -754,9 +823,9 @@ if __name__ == '__main__':
             ##
             ## RN/DELTA_RN CURVES
             ##
-
-            rn_vals  = rn [rn['well']  == row['Well']].iloc[:,rn.columns.get_loc('1'):].transpose().iloc[:,0].tolist()
-            drn_vals = drn[drn['well'] == row['Well']].iloc[:,drn.columns.get_loc('1.1'):].transpose().iloc[:,0].tolist()
+            rn       = rn.sort_values(by=['well','cycle'])
+            rn_vals  = rn[rn['well'] == row['Well']]['Rn'].tolist()
+            drn_vals = rn[rn['well'] == row['Well']]['Delta Rn'].tolist()
 
             # Create a list of amplificationdata objects
             amplification_data = []
@@ -878,15 +947,12 @@ if __name__ == '__main__':
 
          # Store parsing output
          rn['bcd'] = platebc
-         rnlist = rn.melt(id_vars=['bcd', 'well','rep'], var_name='cycle', value_name='Rn')
-         rnlist['cycle'] = rnlist['cycle'].astype(int)
-         #      rnlist.columns = ['Plate_Barcode', 'Well', 'Reporter', 'Cycle', 'Rn']
-         #rnlist = rnlist.sort_values(by=['Well','Cycle'])
+         
          results.to_csv(results_outfile, sep='\t', index=False)
          logging.info('[pcrplate={}] parsed results exported to: {}'.format(platebc, results_outfile))
 
-         rnlist.to_csv(rn_outfile, sep='\t', index=False)
-         logging.info('[pcrplate={}] export Rn/Delta_Rn values to: {}'.format(platebc, rn_outfile))
+         rn.to_csv(rn_outfile, sep='\t', index=False)
+         logging.info('[pcrplate={}] export Rn/Delta Rn values to: {}'.format(platebc, rn_outfile))
 
          logging.info('[pcrplate={}] SUCCESS pcrplate processing'.format(platebc))
 
