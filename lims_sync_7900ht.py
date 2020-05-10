@@ -695,9 +695,9 @@ if __name__ == '__main__':
             ##
 
             # Ct and amplification
-            threshold     = default_ct_threshold if pd.isna(row['Threshold']) else row['Threshold']
-            ct            = None if row['Ct'] == 'NA' else row['Ct']
-            amplification = None if threshold is None else False if ct is None else float(ct) <= threshold
+            ct            = None  if row['Ct'] == 'NA' else row['Ct']
+            amplification = False if ct is None else float(ct) <= default_ct_threshold
+            threshold     = None  if pd.isna(row['Threshold']) else row['Threshold']
 
             # qPCR detector
             if not assert_warning(row['Detector Name'].lower() in detector_ids, '[pcrplate={}/pcrwell={}] detector {} not found in LIMS, setting to "None"'.format(platebc, pcrwell_pos, row['Detector Name'])):
