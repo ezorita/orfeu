@@ -119,29 +119,32 @@ def html_digest(report, tb):
    <td{c}>Organization</td>\
    <td{c}>Project samples</td>\
    <td{c}>PCR verified</td>\
-   <td{c}>Sent to Org</td>\
-   <td{c}>Reviewed by Org</td>\
+   <td{c}>Sent for review</td>\
+   <td{c}>Reviewed</td>\
+   <td{c}>Results sent</td>\
    </tr>'.format(c=header_color)
 
    # Remove completed diagnosis
    for rna in report:
       for pcr in rna['pcr']:
          for proj in pcr['projects']:
-            if proj['completed']:
+            if proj['done'] or (pcr['verified'] and proj['sent'] == 'F'):
                continue
 
             html += '<tr>'
-            html += '<td><b>{}</b></td><td>{}</td><td>{}</td><td>{}</td><td{}>{}</td><td{}>{}</td><td{}>{}</td>'.format(
+            html += '<td><b>{}</b></td><td>{}</td><td>{}</td><td>{}</td><td{}>{}</td><td{}>{}</td><td{}>{}</td><td{}>{}</td>'.format(
                pcr['barcode'],
                proj['name'],
                proj['org'],
                proj['samples'],
                true_color if pcr['verified'] else false_color,
                '✅' if pcr['verified'] else '❌',
-               true_color if proj['sent'] else false_color,
-               '✅' if proj['sent'] else '❌',
-               true_color if proj['completed'] else false_color,
-               '✅' if proj['completed'] else '❌'
+               true_color if proj['sent'] == 'Y' else '' if proj['sent'] == 'F' else false_color,
+               '✅' if proj['sent'] == 'Y' else '&nbsp;' if proj['sent'] == 'F' else '❌',
+               true_color if proj['reviewed'] else '' if proj['sent'] == 'F' else false_color,
+               '✅' if proj['reviewed'] else '' if proj['sent'] == 'F' else '❌',
+               true_color if proj['done'] else '' if proj['sent'] == 'F' else false_color,
+               '✅' if proj['done'] else '' if proj['sent'] == 'F' else '❌'
             )
 
             html += '</tr>'
@@ -327,13 +330,13 @@ if __name__ == '__main__':
                   p = projects[proj['project']]
                   projinfo['name'] = p['name'] if p else 'UNKNOWN'
                   projinfo['org']  = orgs[p['organization']]['name'] if p['organization'] in orgs else 'UNKNOWN'
-                  projinfo['sent'] = proj['diagnosis_sent']
-                  projinfo['completed'] = proj['diagnosis_completed']
-                  if not proj['diagnosis_completed']:
+                  projinfo['sent'] = proj['results_sent'] # N: Not sent, Y: Sent, F: Never Send
+                  projinfo['reviewed'] = proj['diagnosis_completed'] # 0: Not sent, 1; Sent
+                  projinfo['done'] = proj['diagnosis_sent'] if projinfo['name'] == 'ORFEU' else projinfo['reviewed'] # 0: Not sent, 1: Sent
+                  if not (proj['diagnosis_sent'] or proj['results_sent'] == 'F'):
                      r, status = lims_request('GET', rnawell_url, params= {'limit': 10000, 'sample__project__name__exact': p['name'], 'rna_extraction_plate__barcode__exact': rnabcd})
                      assert_error(status < 300, 'Could not retreive sample count for project {}/ pcrplate {} from LIMS'.format(p['name'], pcrbcd))
                      projinfo['samples'] = r.json()['meta']['total_count']
-                     
                   else:
                      projinfo['samples'] = 'NA'
 
