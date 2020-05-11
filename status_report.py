@@ -104,7 +104,7 @@ def html_digest(report, tb):
                true_color if pcr['uploaded'] else false_color,
                '✅' if pcr['uploaded'] else '❌',
                true_color if pcr['verified'] else false_color,
-               '✅' if pcr['verified'] else '❌'
+               '✅' if pcr['verified'] == 'OK' else '<b>Failed</b>' if pcr['verified'] == 'F' else '❌'
             )
             html += '</tr>'
 
@@ -138,7 +138,7 @@ def html_digest(report, tb):
                proj['org'],
                proj['samples'],
                true_color if pcr['verified'] else false_color,
-               '✅' if pcr['verified'] else '❌',
+               '✅' if pcr['verified'] == 'OK' else '<b>Failed</b>' if pcr['verified'] == 'F' else '❌',
                true_color if proj['sent'] == 'Y' else '' if proj['sent'] == 'F' else false_color,
                '✅' if proj['sent'] == 'Y' else '&nbsp;' if proj['sent'] == 'F' else '❌',
                true_color if proj['reviewed'] else '' if proj['sent'] == 'F' else false_color,
@@ -315,7 +315,7 @@ if __name__ == '__main__':
             # Run info
             if uri in pcrruns:
                pcrinfo['uploaded'] = True
-               pcrinfo['verified'] = pcrruns[uri]['status'] == 'OK'
+               pcrinfo['verified'] = pcrruns[uri]['status'] if (pcrruns[uri]['status'] == 'OK' or pcrruns[uri]['status'] == 'F') else False
             else:
                pcrinfo['uploaded'] = False
                pcrinfo['verified'] = False
