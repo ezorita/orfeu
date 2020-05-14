@@ -106,6 +106,7 @@ status_code = {
    'EMP': 4, # Empty well
    'PCT': 5, # Passed control
    'FCT': 6, # Failed control
+   'NV':  7  # Invalid sample
 }
 
 status_color = {
@@ -115,7 +116,8 @@ status_color = {
    status_code['NAD']: 'darkslategray',
    status_code['EMP']: 'lightgray',
    status_code['PCT']: 'darkgreen',
-   status_code['FCT']: 'darkred'
+   status_code['FCT']: 'darkred',
+   status_code['NV']:  'saddlebrown'
 }
 
 def compute_diagnosis(samples):
@@ -237,6 +239,7 @@ def html_digest(digest, log_file, tb):
             <td>Negative</td>\
             <td>Positive</td>\
             <td>Inconclusive</td>\
+            <td>Invalid</td>\
             <td>No AD</td>\
             <th>Total Controls</th>\
             <td>Passed</td>\
@@ -253,10 +256,11 @@ def html_digest(digest, log_file, tb):
             # Fill table
             html += '<tr>'
             html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(bcd)
-            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['P']]+freq[status_code['N']]+freq[status_code['I']]+freq[status_code['NAD']])
+            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['P']]+freq[status_code['N']]+freq[status_code['I']]+freq[status_code['NAD']]+freq[status_code['NV']])
             html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['N']])
             html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['P']])
             html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['I']])
+            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['NV']])
             html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['NAD']])
             html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['PCT']]+freq[status_code['FCT']])
             html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['PCT']])
@@ -273,6 +277,7 @@ def html_digest(digest, log_file, tb):
          html += '<td style="background-color:{}">&nbsp;</td><td>Negative</td>'.format(status_color[status_code['N']])
          html += '<td style="background-color:{}">&nbsp;</td><td>Positive</td>'.format(status_color[status_code['P']])
          html += '<td style="background-color:{}">&nbsp;</td><td>Inconclusive</td>'.format(status_color[status_code['I']])
+         html += '<td style="background-color:{}">&nbsp;</td><td>Invalid</td>'.format(status_color[status_code['NV']])
          html += '<td style="background-color:{}">&nbsp;</td><td>Control OK</td>'.format(status_color[status_code['PCT']])
          html += '<td style="background-color:{}">&nbsp;</td><td>Control FAIL</td>'.format(status_color[status_code['FCT']])
          html += '<td style="background-color:{}">&nbsp;</td><td>Empty</td>'.format(status_color[status_code['EMP']])
