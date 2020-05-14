@@ -462,9 +462,9 @@ def parse_viia7(results_file):
       
       # Rn dataframe
       rn = pd.read_csv(io.StringIO(rn_text), delim_whitespace=True, names=['well', 'cycle', 'rep', 'Rn', 'Delta Rn'])
-      rn_all['cycle'] = rn_all['cycle'].astype(int)
-      rn_all['Rn'] = rn_all['Rn'].apply(lambda x: ''.join(x.split(','))).astype(float)
-      rn_all['Delta Rn'] = rn_all['Delta Rn'].apply(lambda x: ''.join(x.split(','))).astype(float)
+      rn['cycle']    = rn['cycle'].astype(int)
+      rn['Rn']       = rn['Rn'].apply(lambda x: ''.join(x.split(','))).astype(float)
+      rn['Delta Rn'] = rn['Delta Rn'].apply(lambda x: ''.join(x.split(','))).astype(float)
 
       return data, rn, run_date
 
