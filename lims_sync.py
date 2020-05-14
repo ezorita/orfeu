@@ -15,7 +15,7 @@ import logging
 from dateutil.parser import parse as date_parse
 import pandas as pd
 
-__version__ = '0.12'
+__version__ = '0.13'
 
 # TODO: How to handle unfinished syncs (i.e. the connection broke during sync) --> verify script
 #
