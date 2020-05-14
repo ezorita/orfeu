@@ -119,8 +119,10 @@ status_color = {
 }
 
 def compute_diagnosis(samples):
-   if samples == [False, False, False]\
-      or samples == [False, True, False]\
+   if samples == [False, False, False]:
+      return 'NV'
+   
+   elif samples == [False, True, False]\
       or samples == [True, False, True]\
       or samples == [False, True, True]:
       return 'I'
@@ -460,6 +462,9 @@ def parse_viia7(results_file):
       
       # Rn dataframe
       rn = pd.read_csv(io.StringIO(rn_text), delim_whitespace=True, names=['well', 'cycle', 'rep', 'Rn', 'Delta Rn'])
+      rn_all['cycle'] = rn_all['cycle'].astype(int)
+      rn_all['Rn'] = rn_all['Rn'].apply(lambda x: ''.join(x.split(','))).astype(float)
+      rn_all['Delta Rn'] = rn_all['Delta Rn'].apply(lambda x: ''.join(x.split(','))).astype(float)
 
       return data, rn, run_date
 
