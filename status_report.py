@@ -65,10 +65,9 @@ def html_digest(report, tb):
    false_color  = ' style="background-color:lightcoral;"'
    
    html = '<html><head><style>\nth, td { text-align: center; padding: 10px; }\ntable, th, td { border: 1px solid black; border-collapse: collapse;}\n</style></head><body>'
-   html_index = '- <a href="#description">Job description</a><br>'
 
    # Header with ?index?
-   html += '<h1>Project status report ({})</h1>\n'.format(datetime.datetime.now().strftime('%d/%m/%Y'))
+   html += '<h1>Project status report ({})</h1>\n'.format(datetime.datetime.now().strftime('%d/%m/%Y %H:%M'))
    
    # PCR in progress
    html += '<br><h2>PCR runs in progress</h2>\n'
