@@ -573,7 +573,6 @@ if __name__ == '__main__':
       machines, status = lims_request('GET', url=pcrmachine_url, params={'limit': 1000000})
       assert_critical(status < 300, 'Could not retreive pcr machines from LIMS')
       machine_ids = {machine['name'].lower(): machine['resource_uri'] for machine in machines.json()['objects']}
-      import pdb; pdb.set_trace()
 
       # Find all processed samples in path
       flist = glob.glob('{}/*_results.txt'.format(path))
