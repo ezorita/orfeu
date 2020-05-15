@@ -15,10 +15,7 @@ import logging
 from dateutil.parser import parse as date_parse
 import pandas as pd
 
-__version__ = '0.13'
-
-# TODO: How to handle unfinished syncs (i.e. the connection broke during sync) --> verify script
-#
+__version__ = '0.14'
 
 # EXPERIMENT DEFINITIONS
 default_ct_threshold = 40
@@ -54,6 +51,7 @@ api_root           = '/prbblims/api/covid19/'
 pcrplate_base      = '{}pcrplate/'.format(api_root)
 pcrrun_base        = '{}pcrrun/'.format(api_root)
 pcrwell_base       = '{}pcrwell/'.format(api_root)
+pcrmachine_base    = '{}pcrruninstrument/'.format(api_root)
 detector_base      = '{}detector/'.format(api_root)
 results_base       = '{}results/'.format(api_root)
 amplification_base = '{}amplificationdata/'.format(api_root)
@@ -62,6 +60,7 @@ organization_base  = '{}organization/'.format(api_root)
 pcrplate_url      = '{}{}'.format(base_url, pcrplate_base)
 pcrwell_url       = '{}{}'.format(base_url, pcrwell_base)
 pcrrun_url        = '{}{}'.format(base_url, pcrrun_base)
+pcrmachine_url    = '{}{}'.format(base_url, pcrmachine_base)
 detector_url      = '{}{}'.format(base_url, detector_base)
 results_url       = '{}{}'.format(base_url, results_base)
 amplification_url = '{}{}'.format(base_url, amplification_base)
@@ -570,6 +569,12 @@ if __name__ == '__main__':
       assert_critical(status < 300, 'Could not retreive pcr detectors from LIMS')
       detector_ids = {detector['name'].lower(): detector['resource_uri'] for detector in detectors.json()['objects']}
 
+      # Get list of PCR machines
+      machines, status = lims_request('GET', url=pcrmachine_url, params={'limit': 1000000})
+      assert_critical(status < 300, 'Could not retreive pcr machines from LIMS')
+      machine_ids = {machine['name'].lower(): machine['resource_uri'] for machine in machines.json()['objects']}
+      import pdb; pdb.set_trace()
+
       # Find all processed samples in path
       flist = glob.glob('{}/*_results.txt'.format(path))
 
@@ -619,6 +624,7 @@ if __name__ == '__main__':
 
          # Check _results.txt file header (parse machine type)
          parser = ''
+         runinstrument = None
          with open(fname) as f:
             firstline = f.readline()
             if firstline[0] == '*':
@@ -648,9 +654,13 @@ if __name__ == '__main__':
                   continue
 
             results, rn, run_date = parse_7900ht(fname, clipped_fname)
+
+            # Set machine
+            runinstrument = machine_ids['7900HT'.lower()] if '7900HT'.lower() in machine_ids else None
          
          elif parser == 'viia7':
             results, rn, run_date = parse_viia7(fname)
+            runinstrument = machine_ids['viia7'.lower()] if 'viia7'.lower() in machine_ids else None
                   
          # Format results
          results['Ct'] = results['Ct'].apply(rename_Ct)
@@ -928,7 +938,7 @@ if __name__ == '__main__':
             'id': None,
             'pcr_plate': plateobj['resource_uri'],
             'technician_id': None,
-            'pcr_run_instrument_id': None,
+            'pcr_run_instrument': runinstrument,
             'pcr_run_protocol_id': None,
             'date_run': date_parse(run_date).isoformat(),
             'raw_results_file_path': fname,
