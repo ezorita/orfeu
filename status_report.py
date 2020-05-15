@@ -5,6 +5,7 @@ import datetime
 import argparse
 import traceback
 import smtplib, ssl
+import pandas as pd
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -34,6 +35,7 @@ pcrplate_base      = '{}pcrplate/'.format(api_root)
 pcrproject_base    = '{}pcrplateproject/'.format(api_root)
 pcrrun_base        = '{}pcrrun/'.format(api_root)
 pcrwell_base       = '{}pcrwell/'.format(api_root)
+sample_base        = '{}sample/'.format(api_root)
 detector_base      = '{}detector/'.format(api_root)
 results_base       = '{}results/'.format(api_root)
 amplification_base = '{}amplificationdata/'.format(api_root)
@@ -46,6 +48,7 @@ pcrplate_url      = '{}{}'.format(base_url, pcrplate_base)
 pcrproject_url    = '{}{}'.format(base_url, pcrproject_base)
 pcrwell_url       = '{}{}'.format(base_url, pcrwell_base)
 pcrrun_url        = '{}{}'.format(base_url, pcrrun_base)
+sample_url        = '{}{}'.format(base_url, sample_base)
 detector_url      = '{}{}'.format(base_url, detector_base)
 results_url       = '{}{}'.format(base_url, results_base)
 amplification_url = '{}{}'.format(base_url, amplification_base)
@@ -57,17 +60,60 @@ organization_url  = '{}{}'.format(base_url, organization_base)
 ### HTML REPORT
 ###
 
-def html_digest(report, tb):
+def html_digest(report, stats, tb):
 
    # Color definition
    header_color = ' style="background-color:gainsboro;"'
+   count_color  = ' style="background-color:ivory;"'
    true_color   = ' style="background-color:rgb(212,239,223);"'
    false_color  = ' style="background-color:lightcoral;"'
    
    html = '<html><head><style>\nth, td { text-align: center; padding: 10px; }\ntable, th, td { border: 1px solid black; border-collapse: collapse;}\n</style></head><body>'
 
-   # Header with ?index?
+   # Header
    html += '<h1>Project status report ({})</h1>\n'.format(datetime.datetime.now().strftime('%d/%m/%Y %H:%M'))
+
+   # Sample stats
+   html += '<br><h2>Sample stats</h2>\n'
+   html += '<table style="white-space:nowrap;"><tr>\
+   <th{c} rowspan="2">Project</th>\
+   <th{c} rowspan="2">In RNA plate</th>\
+   <th{c} rowspan="2">In PCR plate</th>\
+   <th{c} rowspan="2">Awaiting PCR verif.</th>\
+   <th{c} colspan="3">PCR Verified</th>\
+   <th{c} rowspan="2">Sent - Awaiting review</th>\
+   <th{c} rowspan="2">Reviewed</th>\
+   <th{c} rowspan="2">Sent to CTTI/ICS</th>\
+   </tr><tr>\
+   <th{c}>Failed</th>\
+   <th{c}>On Hold</th>\
+   <th{c}>Success</th>\
+   </tr>'.format(c=header_color)
+
+   list_failed = False
+   list_onhold = False
+   
+   for proj in stats['project'].unique():
+      if (sample_stats['project'] == proj).sum() == 0:
+         continue
+      html += '<tr>'
+      html += '<td><b>{}</b></td>'.format(proj)
+      html += '<td>{}</td>'.format(((sample_stats['project'] == proj) & (sample_stats['status'] == 'RNA')).sum())
+      html += '<td>{}</td>'.format(((sample_stats['project'] == proj) & (sample_stats['status'] == 'PCR')).sum())
+      html += '<td>{}</td>'.format(((sample_stats['project'] == proj) & (sample_stats['status'] == 'RUNNING')).sum())
+      failed_cnt = ((sample_stats['project'] == proj) & (sample_stats['status'] == 'FAILED')).sum()
+      list_failed = True if failed_cnt else list_failed
+      html += '<td>{}</td>'.format(failed_cnt if failed_cnt == 0 else '<a href="#failed{}">{}</a>'.format(proj,failed_cnt))
+      hold_cnt = ((sample_stats['project'] == proj) & (sample_stats['status'] == 'HOLD')).sum()
+      list_onhold = True if hold_cnt else list_onhold
+      html += '<td>{}</td>'.format(hold_cnt if hold_cnt == 0 else '<a href="#hold{}">{}</a>'.format(proj, hold_cnt))
+      html += '<td>{}</td>'.format(((sample_stats['project'] == proj) & (sample_stats['status'] == 'VERIFIED')).sum())
+      html += '<td>{}</td>'.format(((sample_stats['project'] == proj) & (sample_stats['status'] == 'SENT')).sum())
+      html += '<td>{}</td>'.format(((sample_stats['project'] == proj) & (sample_stats['status'] == 'REVIEWED')).sum())
+      html += '<td{}><b>{}</b></td>'.format(count_color, ((sample_stats['project'] == proj) & (sample_stats['status'] == 'DONE')).sum())
+      html += '</tr>'
+      
+   html += '</table>'
    
    # PCR in progress
    html += '<br><h2>PCR runs in progress</h2>\n'
@@ -148,7 +194,36 @@ def html_digest(report, tb):
 
             html += '</tr>'
    html += '</table>'
-   
+
+   # List of samples
+   if list_failed or list_onhold:
+      html += '<br><h2>List of potentially delayed samples</h2>\n'
+      if list_failed:
+         html += '<h3>Samples on <b>failed</b> PCRs</h3>\n'
+         
+         for proj in stats['project'].unique():
+            failed_samples = sample_stats[((sample_stats['project'] == proj) & (sample_stats['status'] == 'FAILED'))]
+            if failed_samples.shape[0]:
+               failed_samples = failed_samples.sort_values('pcrplate')
+               html += '<h4><a name="failed{}"></a>Samples on Failed PCR (Project: {}, samples: {})</h4>\n'.format(proj,proj,failed_samples.shape[0])
+               html += '<p style="font-family:\'Courier New\'">'
+               for s in failed_samples.iterrows():
+                  html += '{}\t{}<br>'.format(s[1]['pcrplate'], s[1]['sample'])
+               html += '</p>'
+
+      if list_onhold:
+         html += '<br><h3>Samples <b>on hold</b> in PCRs</h3>\n'
+         
+         for proj in stats['project'].unique():
+            hold_samples = sample_stats[((sample_stats['project'] == proj) & (sample_stats['status'] == 'HOLD'))]
+            if hold_samples.shape[0]:
+               hold_samples = hold_samples.sort_values('pcrplate')
+               html += '<h4><a name="hold{}"></a>Samples in PCR on hold (Project: {}, samples: {})</h4>\n'.format(proj,proj,hold_samples.shape[0])
+               html += '<p style="font-family:\'Courier New\'">'
+               for s in hold_samples.iterrows():
+                  html += '{}\t{}<br>'.format(s[1]['pcrplate'], s[1]['sample'])
+               html += '</p>'
+
    html += "</body></html>"
 
    return MIMEText(html, 'html')
@@ -161,12 +236,12 @@ smtp_server     = "smtp.gmail.com"
 email_port      = 465
 email_receivers = EMAIL_RECEIVERS.split(',')
 
-def send_digest(digest, tb=None):
+def send_digest(digest, stats, tb=None):
    message = MIMEMultipart()
    message['From']    = 'PRBB LIMS <{}>'.format(EMAIL_SENDER)
    message['Subject'] = "Project status report ({})".format(datetime.datetime.now().strftime('%d/%m/%Y'))
    message['Bcc']     = ','.join(email_receivers)
-   message.attach(html_digest(digest, tb))
+   message.attach(html_digest(digest, stats, tb))
    
    context = ssl.create_default_context()
    with smtplib.SMTP_SSL(smtp_server, email_port, context=context) as server:
@@ -240,6 +315,31 @@ def getOptions(args=sys.argv[1:]):
    options = parser.parse_args(args)
    return options
 
+###
+### SAMPLE STATUS FILTER
+###
+
+def sample_status(group):
+   status = 'RNA'
+   if group['diagnosis_sent'].any():
+      status = 'DONE'
+   elif group['diagnosis_completed'].any():
+      status = 'REVIEWED'
+   elif (group['results_sent'] == 'Y').any():
+      status = 'SENT'
+   elif (group['status_y'] == 'OK').any():
+      status = 'VERIFIED'
+   elif (group['status_y'] == 'R').any():
+      status = 'RUNNING'
+   elif (group['status_y'] == 'H').any():
+      status = 'HOLD'
+   elif (group['status_y'] == 'F').any():
+      status = 'FAILED'
+   elif group['pcr_plate'].any():
+      status = 'PCR'
+
+   return pd.DataFrame({'sample': [group['sample_bcd'].iloc[0]], 'project': [group['project'].iloc[0]], 'pcrplate': [group['pcr_plate'].iloc[0]], 'status': [status]})
+
 
 ###
 ### MAIN SCRIPT
@@ -254,28 +354,45 @@ if __name__ == '__main__':
    # Set up logger
    logpath = setup_logger(options.logpath).replace('//','/')
 
-   # Get rna plates
-   r, status = lims_request('GET', rnaplate_url, params={'limit': 10000})
-   assert_critical(status < 300, 'Could not retreive rna plates from LIMS')
-   rnaplates = r.json()['objects']
-   rnaplates = {o['barcode']: o for o in rnaplates}
+   
+   ##
+   ## OVERALL PROJECT STATUS
+   ##
 
-   # Get pcr plates
-   r, status = lims_request('GET', pcrplate_url, params={'limit': 10000})
-   assert_critical(status < 300, 'Could not retreive pcr plates from LIMS')
-   pcrplates = r.json()['objects']
-   pcrplates = {o['barcode']: o for o in pcrplates}
+   # Sample info
+   # next_url = sample_base 
+   # samples = [] 
+   # while next_url: 
+   #    r, status = lims_request('GET', base_url+next_url, params={'limit': 10000}) 
+   #    if not assert_critical(status < 300, 'Could not retreive samples from LIMS'):
+   #       break
+   #    samples.extend(r.json()['objects']) 
+   #    next_url = r.json()['meta']['next']
+
+   # Rna wells
+   next_url = rnawell_base 
+   rnawells = [] 
+   while next_url: 
+      r, status = lims_request('GET', base_url+next_url, params={'limit': 10000}) 
+      if not assert_critical(status < 300, 'Could not retreive rna wells from LIMS'):
+         break
+      rnawells.extend(r.json()['objects']) 
+      next_url = r.json()['meta']['next']
+   
+   # Pcr wells
+   next_url = pcrwell_base
+   pcrwells = [] 
+   while next_url: 
+      r, status = lims_request('GET', base_url+next_url, params={'limit': 10000}) 
+      if not assert_critical(status < 300, 'Could not retreive pcr wells from LIMS'):
+         break
+      pcrwells.extend(r.json()['objects']) 
+      next_url = r.json()['meta']['next']
 
    # Get pcr plate projects
    r, status = lims_request('GET', pcrproject_url, params={'limit': 10000})
    assert_critical(status < 300, 'Could not retreive pcr plate projects from LIMS')
    pcrprojects = r.json()['objects']
-
-   # Get pcr runs
-   r, status = lims_request('GET', pcrrun_url, params={'limit': 10000})
-   assert_critical(status < 300, 'Could not retreive pcr runs from LIMS')
-   pcrruns = r.json()['objects']
-   pcrruns = {o['pcr_plate']: o for o in pcrruns}
 
    # Get projects
    r, status = lims_request('GET', project_url, params={'limit': 10000})
@@ -283,7 +400,50 @@ if __name__ == '__main__':
    projects = r.json()['objects']
    projects = {o['resource_uri']: o for o in projects if not o['name'] in ['CONTROLS', 'SERRANO_HOSPITAL', 'TESTS']}
 
-   # Get projects
+   # Get pcr runs
+   r, status = lims_request('GET', pcrrun_url, params={'limit': 10000})
+   assert_critical(status < 300, 'Could not retreive pcr runs from LIMS')
+   pcrruns_data = r.json()['objects']
+   pcrruns = {o['pcr_plate']: o for o in pcrruns_data}
+   
+   # Get pcr plates
+   r, status = lims_request('GET', pcrplate_url, params={'limit': 10000})
+   assert_critical(status < 300, 'Could not retreive pcr plates from LIMS')
+   pcrplates = r.json()['objects']
+   pcrplate_bcd = {o['resource_uri']: o['barcode'] for o in pcrplates}
+   pcrplates = {o['barcode']: o for o in pcrplates}
+
+   # Create data frames
+#   samples  = pd.DataFrame(samples)
+   dfrnawells = pd.DataFrame(rnawells)
+   dfpcrwells = pd.DataFrame(pcrwells)
+   dfpcrprojs = pd.DataFrame(pcrprojects)
+   dfpcrruns  = pd.DataFrame(pcrruns_data)
+
+   dfrnawells['project']    = dfrnawells['sample'].apply(lambda x: x['project'])
+   dfrnawells['sample_bcd'] = dfrnawells['sample'].apply(lambda x: x['barcode'])
+   
+   # Merge tables
+   data = dfrnawells.merge(dfpcrwells, how='left', left_on='resource_uri', right_on='rna_extraction_well')
+   data = data.merge(dfpcrprojs, how='left', on=['pcr_plate', 'project'])
+   data = data.merge(dfpcrruns, how='left', on='pcr_plate')
+   
+   data['project'] = data['project'].apply(lambda x: projects[x]['name'] if x in projects else None)
+   data['pcr_plate'] = data['pcr_plate'].apply(lambda x: pcrplate_bcd[x] if x in pcrplate_bcd else None)
+
+   sample_stats = data.groupby(by='sample_bcd').apply(sample_status)
+   
+   ##
+   ## PCR STATUS INFO
+   ##
+
+   # Get rna plates
+   r, status = lims_request('GET', rnaplate_url, params={'limit': 10000})
+   assert_critical(status < 300, 'Could not retreive rna plates from LIMS')
+   rnaplates = r.json()['objects']
+   rnaplates = {o['barcode']: o for o in rnaplates}
+
+   # Get organizations
    r, status = lims_request('GET', organization_url, params={'limit': 10000})
    assert_critical(status < 300, 'Could not retreive organizations from LIMS')
    orgs = r.json()['objects']
@@ -347,6 +507,6 @@ if __name__ == '__main__':
             pcrs.append(pcrinfo)
       info['pcr'] = pcrs
       report.append(info)
-
+   
    # Send status report
-   send_digest(report)
+   send_digest(report, sample_stats)
