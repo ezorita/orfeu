@@ -124,6 +124,7 @@ def compute_diagnosis(samples):
       return 'NV'
    
    elif samples == [False, True, False]\
+      or samples == [True, False, False]\
       or samples == [True, False, True]\
       or samples == [False, True, True]:
       return 'I'
