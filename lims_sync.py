@@ -511,7 +511,7 @@ def parse_7900ht_results(results_file):
 
 
    # Create DataFrame
-   data = pd.read_csv(io.StringIO('\n'.join(rows)), delim_whitespace=True, names=colnames)
+   data = pd.read_csv(io.StringIO('\n'.join(rows)), names=colnames, sep='\t', index_col=False)
    
    return data, run_date
 
@@ -802,8 +802,8 @@ if __name__ == '__main__':
                'date_analysis': datetime.datetime.now().isoformat(),
                'date_sent': datetime.datetime.now().isoformat(),
                'amplification': amplification,
-               #'threshold': threshold,
                'threshold': default_ct_threshold,
+               'qpcr_threshold': threshold,
                'detector': detector_id,
                'detector_lot_number': None,
                'ct': ct
