@@ -137,7 +137,7 @@ def html_digest(report, stats, tb):
          html += '</tr>'
       else:
          for pcr in rna['pcr']:
-            if pcr['verified']:
+            if pcr['verified'] in ['OK', 'F']:
                continue
             html += '<tr>'
             html += '<td><b>{}</b></td><td>{}</td>'.format(rna['barcode'], rna['created'].replace('T', ' '))
@@ -148,8 +148,8 @@ def html_digest(report, stats, tb):
                '✅' if pcr['sdsfile'] else '❌',
                true_color if pcr['uploaded'] else false_color,
                '✅' if pcr['uploaded'] else '❌',
-               true_color if pcr['verified'] else false_color,
-               '✅' if pcr['verified'] == 'OK' else '<b>Failed</b>' if pcr['verified'] == 'F' else '❌'
+               true_color if pcr['verified'] == 'OK' else false_color,
+               '✅' if pcr['verified'] == 'OK' else '<b>Failed</b>' if pcr['verified'] == 'F' else '<b>On Hold</b>' if pcr['verified'] == 'H' else '❌'
             )
             html += '</tr>'
 
@@ -173,7 +173,7 @@ def html_digest(report, stats, tb):
    for rna in report:
       for pcr in rna['pcr']:
          for proj in pcr['projects']:
-            if proj['done'] or (pcr['verified'] and proj['sent'] == 'F'):
+            if proj['done'] or ((pcr['verified'] in ['OK', 'F']) and proj['sent'] == 'F'):
                continue
 
             html += '<tr>'
@@ -182,8 +182,8 @@ def html_digest(report, stats, tb):
                proj['name'],
                proj['org'],
                proj['samples'],
-               true_color if pcr['verified'] else false_color,
-               '✅' if pcr['verified'] == 'OK' else '<b>Failed</b>' if pcr['verified'] == 'F' else '❌',
+               true_color if pcr['verified'] == 'OK' else false_color,
+               '✅' if pcr['verified'] == 'OK' else '<b>Failed</b>' if pcr['verified'] == 'F' else '<b>On Hold</b>' if pcr['verified'] == 'H' else '❌',
                true_color if proj['sent'] == 'Y' else '' if proj['sent'] == 'F' else false_color,
                '✅' if proj['sent'] == 'Y' else '&nbsp;' if proj['sent'] == 'F' else '❌',
                true_color if proj['reviewed'] else '' if proj['sent'] == 'F' else false_color,
@@ -373,9 +373,8 @@ if __name__ == '__main__':
    next_url = rnawell_base 
    rnawells = [] 
    while next_url: 
-      r, status = lims_request('GET', base_url+next_url, params={'limit': 10000}) 
-      if not assert_critical(status < 300, 'Could not retreive rna wells from LIMS'):
-         break
+      r, status = lims_request('GET', base_url+next_url, params={'limit': 1000}) 
+      assert_critical(status < 300, 'Could not retreive rna wells from LIMS')
       rnawells.extend(r.json()['objects']) 
       next_url = r.json()['meta']['next']
    
@@ -383,35 +382,50 @@ if __name__ == '__main__':
    next_url = pcrwell_base
    pcrwells = [] 
    while next_url: 
-      r, status = lims_request('GET', base_url+next_url, params={'limit': 10000}) 
-      if not assert_critical(status < 300, 'Could not retreive pcr wells from LIMS'):
-         break
+      r, status = lims_request('GET', base_url+next_url, params={'limit': 1000}) 
+      assert_critical(status < 300, 'Could not retreive pcr wells from LIMS')
       pcrwells.extend(r.json()['objects']) 
       next_url = r.json()['meta']['next']
 
    # Get pcr plate projects
-   r, status = lims_request('GET', pcrproject_url, params={'limit': 10000})
-   assert_critical(status < 300, 'Could not retreive pcr plate projects from LIMS')
-   pcrprojects = r.json()['objects']
+   next_url = pcrproject_url
+   pcrprojects = []
+   while next_url:
+      r, status = lims_request('GET', next_url, params={'limit': 1000})
+      assert_critical(status < 300, 'Could not retreive pcr plate projects from LIMS')
+      pcrprojects.extend(r.json()['objects'])
+      next_url = r.json()['meta']['next']
+
+   # Get pcr runs
+   next_url = pcrrun_url
+   pcrruns_data = []
+   while next_url:
+      r, status = lims_request('GET', next_url, params={'limit': 1000})
+      assert_critical(status < 300, 'Could not retreive pcr runs from LIMS')
+      pcrruns_data.extend(r.json()['objects'])
+      next_url = r.json()['meta']['next']
+      
+   pcrruns = {o['pcr_plate']: o for o in pcrruns_data}
+
+   # Get pcr plates
+   next_url  = pcrplate_url
+   pcrplates = []
+   while next_url:
+      r, status = lims_request('GET', next_url, params={'limit': 1000})
+      assert_critical(status < 300, 'Could not retreive pcr plates from LIMS')
+      pcrplates.extend(r.json()['objects'])
+      next_url = r.json()['meta']['next']
+      
+   pcrplate_bcd = {o['resource_uri']: o['barcode'] for o in pcrplates}
+   pcrplates = {o['barcode']: o for o in pcrplates}
+
 
    # Get projects
-   r, status = lims_request('GET', project_url, params={'limit': 10000})
+   r, status = lims_request('GET', project_url, params={'limit': 1000})
    assert_critical(status < 300, 'Could not retreive projects from LIMS')
    projects = r.json()['objects']
    projects = {o['resource_uri']: o for o in projects if not o['name'] in ['CONTROLS', 'SERRANO_HOSPITAL', 'TESTS']}
-
-   # Get pcr runs
-   r, status = lims_request('GET', pcrrun_url, params={'limit': 10000})
-   assert_critical(status < 300, 'Could not retreive pcr runs from LIMS')
-   pcrruns_data = r.json()['objects']
-   pcrruns = {o['pcr_plate']: o for o in pcrruns_data}
    
-   # Get pcr plates
-   r, status = lims_request('GET', pcrplate_url, params={'limit': 10000})
-   assert_critical(status < 300, 'Could not retreive pcr plates from LIMS')
-   pcrplates = r.json()['objects']
-   pcrplate_bcd = {o['resource_uri']: o['barcode'] for o in pcrplates}
-   pcrplates = {o['barcode']: o for o in pcrplates}
 
    # Create data frames
 #   samples  = pd.DataFrame(samples)
@@ -474,7 +488,7 @@ if __name__ == '__main__':
             # Run info
             if uri in pcrruns:
                pcrinfo['uploaded'] = True
-               pcrinfo['verified'] = pcrruns[uri]['status'] if (pcrruns[uri]['status'] == 'OK' or pcrruns[uri]['status'] == 'F') else False
+               pcrinfo['verified'] = pcrruns[uri]['status']
             else:
                pcrinfo['uploaded'] = False
                pcrinfo['verified'] = False
