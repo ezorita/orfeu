@@ -15,7 +15,7 @@ import logging
 from dateutil.parser import parse as date_parse
 import pandas as pd
 
-__version__ = '0.14'
+__version__ = '0.15'
 
 # EXPERIMENT DEFINITIONS
 default_ct_threshold = 40
