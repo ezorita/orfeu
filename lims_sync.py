@@ -875,6 +875,7 @@ if __name__ == '__main__':
          ## AUTOMATIC DIAGNOSIS (SINGLEPLEX SPECIFIC CODE)
          ##
 
+         pcrwells_update = []
          for pcrwell in pcrwells:
             dpos = int((ord(pcrwell['position'][0].upper())-65)*24 + int(pcrwell['position'][1:]))
             auto_diagnosis = compute_diagnosis(diagnosis[dpos])
@@ -909,16 +910,18 @@ if __name__ == '__main__':
                # Store sample diagnosis in sample digest
                digest['sample'][platebc][row][col][0] = status_code['NAD' if auto_diagnosis is None else auto_diagnosis]
 
-            pcrwell['pass_fail'] = pass_fail
-            pcrwell['automatic_diagnosis'] = auto_diagnosis
-
+            pcrwells_update.append({
+               'pass_fail': pass_fail,
+               'automatic_diagnosis': auto_diagnosis,
+               'resource_uri': pcrwell['resource_uri']
+            })
 
          ##
          ## UPDATE PCRWELL
          ##
          
          # All wells have been processed, PATCH back to API
-         _, status = lims_request('PATCH', pcrwell_url, json_data={'objects': pcrwells})
+         _, status = lims_request('PATCH', pcrwell_url, json_data={'objects': pcrwells_update})
          if not assert_error(status < 300, '[pcrplate={}/pcrwell] error in PATCH request to update pcrwell (autodiagnosis)'.format(platebc, pcrwell_pos)):
             logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
             digest['error'].append(platebc)
