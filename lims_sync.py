@@ -55,6 +55,8 @@ pcrmachine_base    = '{}pcrruninstrument/'.format(api_root)
 detector_base      = '{}detector/'.format(api_root)
 results_base       = '{}results/'.format(api_root)
 amplification_base = '{}amplificationdata/'.format(api_root)
+rnaplate_base      = '{}rnaextractionplate/'.format(api_root)
+rnawell_base       = '{}rnaextractionwell/'.format(api_root)
 organization_base  = '{}organization/'.format(api_root)
 
 pcrplate_url      = '{}{}'.format(base_url, pcrplate_base)
@@ -64,6 +66,8 @@ pcrmachine_url    = '{}{}'.format(base_url, pcrmachine_base)
 detector_url      = '{}{}'.format(base_url, detector_base)
 results_url       = '{}{}'.format(base_url, results_base)
 amplification_url = '{}{}'.format(base_url, amplification_base)
+rnaplate_url      = '{}{}'.format(base_url, rnaplate_base)
+rnawell_url       = '{}{}'.format(base_url, rnawell_base)
 organization_url  = '{}{}'.format(base_url, organization_base)
 
 
@@ -235,6 +239,7 @@ def html_digest(digest, log_file, tb):
          html += '<br><h2><a name="stats"></a>Sample stats</h2>\n'
          html += '<table style="white-space:nowrap;"><tr>\
             <th>PCR barcode</th>\
+            <th>RNA barcode</th>\
             <th>Total Samples</th>\
             <td>Negative</td>\
             <td>Positive</td>\
@@ -247,25 +252,27 @@ def html_digest(digest, log_file, tb):
             </tr>'
                      
          for bcd in digest['sample']:
-            # Compute sample frequencies
-            freq = pd.Series([c[0] for r in digest['sample'][bcd] for c in r]).value_counts()
-            for s in status_code:
-               if not status_code[s] in freq.index:
-                  freq[status_code[s]] = 0
+            for multi_plate in digest['sample'][bcd]:
+               # Compute sample frequencies
+               freq = pd.Series([c[0] for r in multi_plate[1] for c in r]).value_counts()
+               for s in status_code:
+                  if not status_code[s] in freq.index:
+                     freq[status_code[s]] = 0
 
-            # Fill table
-            html += '<tr>'
-            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(bcd)
-            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['P']]+freq[status_code['N']]+freq[status_code['I']]+freq[status_code['NAD']]+freq[status_code['NV']])
-            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['N']])
-            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['P']])
-            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['I']])
-            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['NV']])
-            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['NAD']])
-            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['PCT']]+freq[status_code['FCT']])
-            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['PCT']])
-            html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['FCT']])
-            html += '</tr>'
+               # Fill table
+               html += '<tr>'
+               html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(bcd)
+               html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(multi_plate[0])
+               html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['P']]+freq[status_code['N']]+freq[status_code['I']]+freq[status_code['NAD']]+freq[status_code['NV']])
+               html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['N']])
+               html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['P']])
+               html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['I']])
+               html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['NV']])
+               html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['NAD']])
+               html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['PCT']]+freq[status_code['FCT']])
+               html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['PCT']])
+               html += '<td><span style="font-family:\'Courier New\'">{}</span></td>'.format(freq[status_code['FCT']])
+               html += '</tr>'
          html += '</table>'
 
          # PCR plate viz
@@ -283,23 +290,27 @@ def html_digest(digest, log_file, tb):
          html += '<td style="background-color:{}">&nbsp;</td><td>Empty</td>'.format(status_color[status_code['EMP']])
          html += '<td style="background-color:{}">&nbsp;</td><td>No autodiag</td>'.format(status_color[status_code['NAD']])
          html += '<td style="border: 2px solid red;">&nbsp;</td><td>No Rp</td></tr></table>'
+         
          for bcd in digest['sample']:
             html += '<h3>PCR run: {}</h3>\n'.format(bcd)
 
-            # Table
-            html += '<table style="empty-cells: show;"><tr>'
-            # Add headers (numbers)
-            for i in range(13):
-               html += '<th style="width:18px;"><span style="font-family:\'Courier New\'">{}</span></th>'.format(i if i else '')
-            html += '</tr>'
-
-            # Add rows
-            for i, r in enumerate(digest['sample'][bcd]):
-               html += '<tr><th><span style="font-family:\'Courier New\'">{}</span></th>'.format(chr(65+i))
-               for c in r:
-                  html += '<td style="background-color:{};{}">&nbsp;</td>'.format(status_color[c[0]], '' if c[1] or c[0] == status_code['EMP'] else 'border: 2px solid red;')
+            for multi_plate in digest['sample'][bcd]:
+               html += '<h4>RNA plate: {}</h4>\n'.format(multi_plate[0])
+               # Table
+               html += '<table style="empty-cells: show;"><tr>'
+               # Add headers (numbers)
+               for i in range(13):
+                  html += '<th style="width:18px;"><span style="font-family:\'Courier New\'">{}</span></th>'.format(i if i else '')
                html += '</tr>'
-            html += '</table>'
+
+               # Add rows
+               for i, r in enumerate(multi_plate[1]):
+                  html += '<tr><th><span style="font-family:\'Courier New\'">{}</span></th>'.format(chr(65+i))
+                  for c in r:
+                     html += '<td style="background-color:{};{}">&nbsp;</td>'.format(status_color[c[0]], '' if c[1] or c[0] == status_code['EMP'] else 'border: 2px solid red;')
+                  html += '</tr>'
+               html += '</table>'
+               
          # Control checks
          html_index += '- <a href="#controls">Control checks</a><br>'
          html += '<br><h2><a name="controls"></a>Control checks</h2>\n'
@@ -594,7 +605,9 @@ if __name__ == '__main__':
          ##
 
          plateobj = [p for p in pcrplates if p['barcode'].lower() == platebc.lower()][0]
-         logging.info('[pcrplate={}] pcrplate found in LIMS (id:{}, uri:{})'.format(platebc, plateobj['id'], plateobj['resource_uri']))
+         logging.info('[pcrplate={}] pcrplate found in LIMS (id:{}, uri:{}, layout:{})'.format(platebc, plateobj['id'], plateobj['resource_uri'], plateobj['plate_layout']))
+         multi_layout = plateobj['plate_layout'] == 'multiplex'
+
 
          # Check if pcrrun for this plate already exists
          r, status = lims_request('GET', url=pcrrun_url, params={'pcr_plate__barcode__exact': platebc})
@@ -729,7 +742,7 @@ if __name__ == '__main__':
             logging.info('[pcrplate={}/pcrwell] len(pcrplate={}/pcrwell) = {}'.format(platebc, platebc, len(pcrwells)))
             
          # Create a lookup table of well_position -> well_id
-         pcrwell_pos_to_uri = {p['position'].upper():p['resource_uri'] for p in pcrwells}
+         pcrwell_by_pos = {p['position'].upper():p for p in pcrwells}
 
          # Create diagnosis for each PCRWELL
          diagnosis = [[None,None,None] for i in range(385)]
@@ -751,11 +764,54 @@ if __name__ == '__main__':
             control_type.update(cp)
 
          ##
+         ## GET RNA PLATES IN THIS PCR PLATE
+         ##
+
+         rnabcd_in_plate = []
+
+         offsets = [0,1] if multi_layout else [0]
+         for o in offsets:
+            pcw = None
+            for r in range(0,8,2):
+               for c in range(1,12,2):
+                  p = chr(ord('A')+r)+str(c+o)
+                  if p in pcrwell_by_pos:
+                     pcw = pcrwell_by_pos[p]
+                     break
+               if pcw:
+                  break
+
+            if not assert_error(pcw, '[pcrplate={}/pcrwell] no PCRWELLS found to identify RNA plate barcode'.format(platebc)):
+               logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
+               digest['error'].append(platebc)
+               continue
+
+
+            # Get associated RNA WELL
+            r, status = lims_request('GET', url=base_url+pcw['rna_extraction_well'])
+            if not assert_error(status == 200, '[pcrplate={}/pcrwell/rnawell] error in GET request for rnawell'.format(platebc)):
+               logging.info('[pcrplate={}] ABORT pcrplate processing'.format(platebc))
+               digest['error'].append(platebc)
+               continue
+
+            rnw = r.json()
+            rnabcd_in_plate.append(r.json()['rna_extraction_plate']['barcode'])
+
+
+         ##
          ## DIGEST DATA
          ##
 
+         # structure rna_barcodes_in_pcr = ['0032','0043', etc.]
+         # fer un digest['sample'][platebc][rnabc] per cada un d'ells
+         # potser millor digest['sample'][platebc].append((rnabc, MATRIX)), en ordre
+         #
+         # what about the control structure?
+
          # Prepare digest sample structure
-         digest['sample'][platebc] = [[[status_code['EMP'], None] for y in range(12)] for x in range(8)]
+         digest['sample'][platebc] = []
+         for rnabcd in rnabcd_in_plate:
+            digest['sample'][platebc].append((rnabcd,[[[status_code['EMP'], None] for y in range(12)] for x in range(8)]))
 
          # Prepare digest control structure
          digest['control'][platebc] = {ct: list() for ct in control_amplif}
@@ -764,18 +820,18 @@ if __name__ == '__main__':
          ###
          ### UPLOAD RESULTS
          ###
-
+         
          fail_flag = False
          for row in results.iterrows():
             i = row[0]
             row = row[1]
             well_num = int(row['Well'])
             pcrwell_pos = chr(65+(well_num-1)//24)+str((well_num-1)%24+1)
-            logging.info('[pcrplate={}/pcrwell={}] BEGIN pcrwell processing'.format(platebc, pcrwell_pos))
+            logging.info('[pcrplate={}/pcrwell={}-{}] BEGIN pcrwell processing'.format(platebc, pcrwell_pos, row['Detector Name']))
 
-            if not (pcrwell_pos in pcrwell_pos_to_uri):
+            if not (pcrwell_pos in pcrwell_by_pos):
                logging.info('[pcrplate={}/pcrwell] well {} not found in LIMS'.format(platebc, pcrwell_pos))
-               logging.info('[pcrplate={}/pcrwell={}] ABORT pcrwell processing'.format(platebc, pcrwell_pos))
+               logging.info('[pcrplate={}/pcrwell={}-{}] ABORT pcrwell processing'.format(platebc, pcrwell_pos, row['Detector Name']))
                continue
 
             ##
@@ -788,7 +844,7 @@ if __name__ == '__main__':
             threshold     = None  if pd.isna(row['Threshold']) else row['Threshold']
 
             # qPCR detector
-            if not assert_warning(row['Detector Name'].lower() in detector_ids, '[pcrplate={}/pcrwell={}] detector {} not found in LIMS, setting to "None"'.format(platebc, pcrwell_pos, row['Detector Name'])):
+            if not assert_warning(row['Detector Name'].lower() in detector_ids, '[pcrplate={}/pcrwell={}-{}] detector {} not found in LIMS, setting to "None"'.format(platebc, pcrwell_pos, row['Detector Name'], row['Detector Name'])):
                detector_id = None
                digest['warning'].append(platebc)
             else:
@@ -797,7 +853,7 @@ if __name__ == '__main__':
             # results LIMS object
             results_data = {
                'id':None,
-               'pcr_well': pcrwell_pos_to_uri[pcrwell_pos],
+               'pcr_well': pcrwell_by_pos[pcrwell_pos]['resource_uri'],
                'comments': None,
                'date_analysis': datetime.datetime.now().isoformat(),
                'date_sent': datetime.datetime.now().isoformat(),
@@ -809,23 +865,43 @@ if __name__ == '__main__':
                'ct': ct
             }
 
-            # Store amplification in diagnosis table (WARN: ASSUMES LOCAL SINGLEPLEX)
-            if ((well_num-1)//24)%2:
-               if (well_num-1)%2: # B2 (empty)
-                  dpos = None
-               else: # B1
-                  dpos = well_num-24
-                  samp = 2
-            else:
-               if (well_num-1)%2: # A2
-                  dpos = well_num-1
-                  samp = 1
-               else: # A1
-                  dpos = well_num
-                  samp = 0
+            # Store amplification in diagnosis table
 
-            if dpos:
-               diagnosis[dpos][samp] = diagnosis[dpos+1][samp] = diagnosis[dpos+24][samp] = amplification
+            if multi_layout: # MULTIPLEX
+               if ((well_num-1)//24)%2:
+                  if (well_num-1)%2: # B2
+                     dpos = well_num-24
+                     samp = 1
+                  else: # B1
+                     dpos = well_num-24
+                     samp = 1
+               else:
+                  if (well_num-1)%2: # A2
+                     dpos = well_num
+                     samp = 2 if row['Detector Name'].lower() == 'rp' else 0
+                  else: # A1
+                     dpos = well_num
+                     samp = 2 if row['Detector Name'].lower() == 'rp' else 0
+                     
+               diagnosis[dpos][samp] = diagnosis[dpos+24][samp] = amplification
+               
+            else: # SINGLEPLEX
+               if ((well_num-1)//24)%2:
+                  if (well_num-1)%2: # B2 (empty)
+                     dpos = None
+                  else: # B1
+                     dpos = well_num-24
+                     samp = 2
+               else:
+                  if (well_num-1)%2: # A2
+                     dpos = well_num-1
+                     samp = 1
+                  else: # A1
+                     dpos = well_num
+                     samp = 0
+
+               if dpos:
+                  diagnosis[dpos][samp] = diagnosis[dpos+1][samp] = diagnosis[dpos+24][samp] = amplification
 
             # POST request (results)
             r, status = lims_request('POST', results_url, json_data=results_data)
@@ -872,7 +948,7 @@ if __name__ == '__main__':
          if fail_flag:
             continue
          ##
-         ## AUTOMATIC DIAGNOSIS (SINGLEPLEX SPECIFIC CODE)
+         ## AUTOMATIC DIAGNOSIS
          ##
 
          pcrwells_update = []
@@ -880,18 +956,23 @@ if __name__ == '__main__':
             dpos = int((ord(pcrwell['position'][0].upper())-65)*24 + int(pcrwell['position'][1:]))
             auto_diagnosis = compute_diagnosis(diagnosis[dpos])
             
-            # Find base position, this is the top left well of each singleplexed sample (WARN: ASSUMES LOCAL SINGLEPLEX)
-            if ((dpos-1)//24)%2:
-               base_pos = dpos-25 if (dpos-1)%2 else dpos-24
+            # Find base position
+            if multi_layout:
+               multi_id = 1 if (dpos-1)%2 else 0
+               base_pos = dpos-24 if ((dpos-1)//24)%2 else dpos
             else:
-               base_pos = dpos-1 if (dpos-1)%2 else dpos
+               multi_id = 0
+               if ((dpos-1)//24)%2:
+                  base_pos = dpos-25 if (dpos-1)%2 else dpos-24
+               else:
+                  base_pos = dpos-1 if (dpos-1)%2 else dpos
                
             # Find row/column in 96-well plate
             row = (base_pos-1)//48
             col = ((base_pos-1)%48)//2
 
             # Report no Rp amplification
-            digest['sample'][platebc][row][col][1] = diagnosis[dpos][2]
+            digest['sample'][platebc][multi_id][1][row][col][1] = diagnosis[dpos][2]
 
             # Check if control well has the expected amplification
             if pcrwell['position'] in control_type:
@@ -903,12 +984,12 @@ if __name__ == '__main__':
                digest['control'][platebc][control_type[w384_pos]].append((w384_pos, pass_fail))
                
                # Store control status in sample digest
-               digest['sample'][platebc][row][col][0] = status_code['PCT' if pass_fail == 'P' else 'FCT']
+               digest['sample'][platebc][multi_id][1][row][col][0] = status_code['PCT' if pass_fail == 'P' else 'FCT']
                
             else:
                pass_fail = 'NA'
                # Store sample diagnosis in sample digest
-               digest['sample'][platebc][row][col][0] = status_code['NAD' if auto_diagnosis is None else auto_diagnosis]
+               digest['sample'][platebc][multi_id][1][row][col][0] = status_code['NAD' if auto_diagnosis is None else auto_diagnosis]
 
             pcrwells_update.append({
                'pass_fail': pass_fail,
