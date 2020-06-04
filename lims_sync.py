@@ -47,7 +47,7 @@ job_start = datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')
 
 # API DEFINITIONS
 base_url           = 'https://orfeu.cnag.crg.eu'
-api_root           = '/prbblims/api/covid19/'
+api_root           = '/prbblims_devel/api/covid19/'
 pcrplate_base      = '{}pcrplate/'.format(api_root)
 pcrrun_base        = '{}pcrrun/'.format(api_root)
 pcrwell_base       = '{}pcrwell/'.format(api_root)
@@ -606,7 +606,7 @@ if __name__ == '__main__':
 
          plateobj = [p for p in pcrplates if p['barcode'].lower() == platebc.lower()][0]
          logging.info('[pcrplate={}] pcrplate found in LIMS (id:{}, uri:{}, layout:{})'.format(platebc, plateobj['id'], plateobj['resource_uri'], plateobj['plate_layout']))
-         multi_layout = plateobj['plate_layout'] == 'multiplex'
+         multi_layout = plateobj['plate_layout'] == 'duplex'
 
 
          # Check if pcrrun for this plate already exists
@@ -705,7 +705,7 @@ if __name__ == '__main__':
             resync = True
 
             # Check first
-            if not assert_error(len(res_objs) <= 384, '[pcrplate={}] error when querying RESULTS for this plate, got {} objects'.format(platebc, len(res_objs))):
+            if not assert_error((not multi_layout and len(res_objs) <= 384) or (multi_layout and len(res_objs) <= 768) , '[pcrplate={}] error when querying RESULTS for this plate, got {} objects'.format(platebc, len(res_objs))):
                digest['error'].append(platebc)
                continue
 
@@ -768,7 +768,6 @@ if __name__ == '__main__':
          ##
 
          rnabcd_in_plate = []
-
          offsets = [0,1] if multi_layout else [0]
          for o in offsets:
             pcw = None
@@ -801,12 +800,6 @@ if __name__ == '__main__':
          ##
          ## DIGEST DATA
          ##
-
-         # structure rna_barcodes_in_pcr = ['0032','0043', etc.]
-         # fer un digest['sample'][platebc][rnabc] per cada un d'ells
-         # potser millor digest['sample'][platebc].append((rnabc, MATRIX)), en ordre
-         #
-         # what about the control structure?
 
          # Prepare digest sample structure
          digest['sample'][platebc] = []
@@ -920,8 +913,8 @@ if __name__ == '__main__':
             ## RN/DELTA_RN CURVES
             ##
             rn       = rn.sort_values(by=['well','cycle'])
-            rn_vals  = rn[rn['well'] == row['Well']]['Rn'].tolist()
-            drn_vals = rn[rn['well'] == row['Well']]['Delta Rn'].tolist()
+            rn_vals  = rn[(rn['well'] == row['Well']) & (rn['rep'].apply(lambda x: x.lower()) == row['Detector Name'].lower())]['Rn'].tolist()
+            drn_vals = rn[(rn['well'] == row['Well']) & (rn['rep'].apply(lambda x: x.lower()) == row['Detector Name'].lower())]['Delta Rn'].tolist()
 
             # Create a list of amplificationdata objects
             amplification_data = []
